@@ -1,0 +1,1111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TraceQA</title>
+<style>
+:root {
+  --bg: #F6F7F9; --card: #FFFFFF; --ink: #14171F; --ink2: #353B48; --muted: #5F6878; --line: #E3E6EB; --line2: #EDEFF2;
+  --accent: #4338CA; --accent-ink: #3B35B5; --accent-soft: #F1F0FD; --nav: #12151C; --nav-ink: #C9CED8; --nav-muted: #9AA3B5; --nav-active: #262B3A;
+  --code-bg: #12151C; --code-ink: #E6E8EE; --danger: #A42A2A; --danger-soft: #FDF5F5; --warn-soft: #FFF8EC; --warn-ink: #7A4B00; --ok-soft: #EEF8EE;
+  --covered: #0CA30C; --failing: #D03B3B; --partial: #FAB219; --ambiguous: #2A78D6; --notrun: #8A92A3; --notcovered: #C3C2B7;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0F1117; --card: #171A22; --ink: #E8EAF0; --ink2: #C9CED8; --muted: #A0A7B5; --line: #2A2F3B; --line2: #232834;
+    --accent: #6D64F0; --accent-ink: #A5B4FC; --accent-soft: #232142; --nav: #0A0C11; --nav-active: #1F2430;
+    --code-bg: #0A0C11; --danger: #FCA5A5; --danger-soft: #2A1A1D; --warn-soft: #2A2416; --warn-ink: #F5C977; --ok-soft: #16261A; --notcovered: #5A5F6B;
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+a { color: var(--accent-ink); }
+.app { display: flex; flex-wrap: wrap; min-height: 100vh; }
+nav.side { flex: 1 1 232px; background: var(--nav); color: var(--nav-ink); padding: 20px 14px; display: flex; flex-direction: column; gap: 18px; }
+.brand { display: flex; gap: 10px; align-items: center; padding: 0 8px; }
+.brand b { color: #fff; font-size: 16px; display: block; }
+.brand span { color: var(--nav-muted); font-size: 11px; }
+.proj { background: #1C2029; border: 1px solid #2A3040; border-radius: 10px; padding: 10px 12px; }
+.proj .k { font-size: 11px; color: var(--nav-muted); text-transform: uppercase; letter-spacing: .06em; }
+.proj .v { color: #fff; font-weight: 600; }
+.proj .u { font: 12px ui-monospace, Consolas, monospace; color: var(--nav-muted); word-break: break-all; }
+.navlinks { display: flex; flex-wrap: wrap; gap: 2px; }
+.navlinks a { flex: 1 1 180px; display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 12px; border-radius: 8px; color: var(--nav-ink); text-decoration: none; font-weight: 500; }
+.navlinks a[aria-current="page"] { background: var(--nav-active); color: #fff; }
+.navlinks svg { width: 18px; height: 18px; flex: none; }
+.navsep { flex-basis: 100%; height: 1px; background: #232836; margin: 6px 0; }
+.running { background: #1C2029; border: 1px solid #2A3040; border-radius: 10px; padding: 10px 12px; font-size: 13px; color: #fff; text-decoration: none; display: none; }
+.running .sub { color: var(--nav-muted); }
+.live { margin-top: auto; font-size: 12px; color: var(--nav-muted); display: flex; align-items: center; gap: 8px; padding: 0 8px; }
+.dot { width: 8px; height: 8px; border-radius: 999px; display: inline-block; flex: none; }
+.pulse { animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }
+main { flex: 999 1 560px; min-width: 0; padding: 28px 32px 48px; display: flex; flex-direction: column; gap: 20px; }
+header.top { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 14px; }
+header.top h1 { margin: 0; font-size: 26px; line-height: 1.2; letter-spacing: -.01em; overflow-wrap: anywhere; }
+.sub { color: var(--muted); font-size: 13px; }
+.btns { display: flex; flex-wrap: wrap; gap: 8px; }
+button, .btn { font: inherit; font-weight: 500; min-height: 40px; padding: 0 14px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--ink); cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
+button.sm, .btn.sm { min-height: 32px; padding: 0 10px; font-size: 13px; }
+button.primary, .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+button.danger { color: var(--danger); }
+button.danger-fill { background: var(--danger); border-color: var(--danger); color: #fff; }
+button.ai::before, .btn.ai::before { content: "✦"; font-size: 12px; }
+button:disabled { opacity: .5; cursor: not-allowed; }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; min-width: 0; }
+.card h2 { margin: 0 0 12px; font-size: 15px; }
+.card h3 { margin: 16px 0 8px; font-size: 14px; }
+.row { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
+.grow2 { flex: 2 1 520px; min-width: 0; } .grow1 { flex: 1 1 300px; min-width: 0; }
+.stack { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.kpis { display: flex; flex-wrap: wrap; gap: 16px; }
+.kpi { flex: 1 1 200px; }
+.kpi b { display: block; font-size: 30px; font-weight: 600; letter-spacing: -.02em; }
+.pipeline { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.pipeline li { flex: 1 1 150px; padding: 10px 12px; border-radius: 10px; background: var(--bg); display: flex; flex-direction: column; gap: 8px; }
+.pipeline .hd { display: flex; gap: 8px; align-items: flex-start; }
+.pipeline .ic { width: 22px; height: 22px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; flex: none; font-size: 12px; font-weight: 700; }
+.pipeline .ok { background: #E2F3E2; color: #0A6B0A; } .pipeline .todo { background: var(--line2); color: var(--muted); }
+.pipeline .act { margin-top: auto; }
+.next { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; background: var(--accent-soft); border: 1px solid var(--accent); }
+.bar { display: flex; gap: 2px; height: 12px; }
+.bar div:first-child { border-radius: 4px 0 0 4px; } .bar div:last-child { border-radius: 0 4px 4px 0; } .bar div:only-child { border-radius: 4px; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 10px 0 4px; font-size: 13px; color: var(--ink2); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.sw { width: 10px; height: 10px; border-radius: 3px; }
+.tbl { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 10px 12px; border-top: 1px solid var(--line2); vertical-align: top; }
+th { font-size: 12px; font-weight: 500; color: var(--muted); border-top: none; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+tr.click { cursor: pointer; } tr.click:hover { background: var(--accent-soft); }
+.mono { font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 999px; background: var(--bg); font-size: 12px; font-weight: 500; white-space: nowrap; }
+.tag { display: inline-block; padding: 2px 8px; border-radius: 6px; background: var(--bg); margin: 2px; font-size: 12px; }
+.tag.ai { background: var(--accent-soft); color: var(--accent-ink); }
+ul.plain { list-style: none; margin: 0; padding: 0; }
+ul.plain > li { padding: 10px 0; border-top: 1px solid var(--line2); }
+ul.plain > li:first-child { border-top: none; }
+pre.code { background: var(--code-bg); color: var(--code-ink); padding: 14px 16px; border-radius: 10px; overflow-x: auto; font: 12.5px/1.65 ui-monospace, Consolas, monospace; margin: 0; }
+pre.log { background: var(--code-bg); color: var(--code-ink); padding: 12px 14px; border-radius: 10px; font: 12px/1.55 ui-monospace, Consolas, monospace; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 520px; overflow-y: auto; }
+pre.err { white-space: pre-wrap; background: var(--danger-soft); padding: 8px 10px; border-radius: 8px; font-size: 12px; margin: 6px 0 0; }
+pre.result { white-space: pre-wrap; background: var(--bg); padding: 10px 12px; border-radius: 8px; font: 12.5px/1.55 ui-monospace, Consolas, monospace; margin: 0; overflow-wrap: anywhere; }
+.filters { display: flex; flex-wrap: wrap; gap: 6px; }
+.filters button, .filters a { min-height: 34px; border-radius: 999px; font-size: 13px; }
+.filters [aria-pressed="true"], .filters [aria-current="page"] { background: var(--ink); color: var(--card); border-color: var(--ink); }
+.ac { border: 1px solid var(--line2); border-radius: 8px; padding: 10px 12px; margin-top: 8px; }
+.ac.bad { border-color: #F3C9C9; background: var(--danger-soft); }
+.issue, .warnbox { background: var(--warn-soft); color: var(--ink); padding: 8px 10px; border-radius: 8px; margin-top: 8px; font-size: 13px; }
+.okbox { background: var(--ok-soft); padding: 8px 10px; border-radius: 8px; margin-top: 8px; font-size: 13px; }
+form.inline { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+input[type=text], input[type=url], input[type=password], input[type=number], input[type=email], input:not([type]), select, textarea {
+  min-height: 38px; border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; font: inherit; background: var(--card); color: var(--ink); max-width: 100%;
+}
+textarea { min-height: 90px; resize: vertical; width: 100%; }
+textarea.editor { min-height: 420px; font: 13px/1.6 ui-monospace, Consolas, monospace; tab-size: 2; }
+form.inline input { flex: 1 1 260px; }
+label.field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 500; flex: 1 1 240px; min-width: 0; }
+.stack > label.field, .stack > .field, .stack > fieldset { flex: 0 0 auto; }
+label.field input, label.field select, label.field textarea { width: 100%; font-weight: 400; }
+label.field .hint { font-weight: 400; color: var(--muted); font-size: 12px; }
+.fields { display: flex; flex-wrap: wrap; gap: 12px 16px; }
+label.check, label.radio { display: flex; gap: 8px; align-items: center; font-size: 14px; flex-wrap: wrap; }
+label.radio { padding: 6px 0; }
+label.radio select, label.radio input[type=text], label.radio input:not([type]) { flex: 1 1 200px; }
+fieldset { border: 1px solid var(--line2); border-radius: 10px; padding: 10px 14px 12px; margin: 0; min-width: 0; }
+legend { font-size: 13px; font-weight: 600; padding: 0 4px; }
+.secret { display: flex; flex-direction: column; gap: 4px; }
+.thumbs { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
+.thumbs figure { margin: 0; font-size: 12px; color: var(--muted); }
+.thumbs img, img.shot { width: 100%; border: 1px solid var(--line); border-radius: 8px; display: block; background: var(--bg); }
+.split { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
+.split > .list { flex: 1 1 260px; min-width: 0; } .split > .detail { flex: 3 1 520px; min-width: 0; }
+.list a.item { display: block; padding: 10px 12px; border-radius: 8px; text-decoration: none; color: var(--ink); border: 1px solid transparent; overflow-wrap: anywhere; }
+.list a.item[aria-current="true"] { background: var(--accent-soft); border-color: var(--accent); }
+.list a.item:hover { background: var(--accent-soft); }
+.ea { display: flex; flex-wrap: wrap; gap: 10px; } .ea > div { flex: 1 1 240px; background: var(--bg); padding: 10px 12px; border-radius: 8px; white-space: pre-wrap; }
+.diff { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; font: 12.5px ui-monospace, Consolas, monospace; margin-top: 6px; }
+.diff .old { color: var(--danger); text-decoration: line-through; } .diff .new { color: var(--covered); }
+.toast { position: fixed; right: 16px; bottom: 16px; max-width: min(460px, calc(100vw - 32px)); background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; box-shadow: 0 8px 30px rgba(0,0,0,.18); display: none; z-index: 10; }
+.toast pre { max-height: 220px; overflow: auto; white-space: pre-wrap; font-size: 12px; margin: 8px 0 0; }
+.updbar { position: sticky; top: 0; z-index: 5; display: none; background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 10px; padding: 8px 12px; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.empty { color: var(--muted); padding: 8px 0; }
+.error { background: var(--danger-soft); color: var(--danger); padding: 12px 14px; border-radius: 10px; white-space: pre-wrap; }
+.savebar { position: sticky; bottom: 0; background: var(--bg); padding: 12px 0; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; border-top: 1px solid var(--line); }
+details > summary { cursor: pointer; font-weight: 500; }
+dialog { border: 1px solid var(--line); border-radius: 14px; padding: 0; background: var(--card); color: var(--ink); width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 32px); }
+dialog.wide { width: min(760px, calc(100vw - 32px)); }
+dialog::backdrop { background: rgba(10, 12, 18, .45); }
+dialog form { display: flex; flex-direction: column; gap: 14px; padding: 20px 22px; }
+dialog h2 { margin: 0; font-size: 18px; }
+.dlg-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+.facts { margin: 0; padding-left: 18px; font-size: 13px; }
+.checks { max-height: 220px; overflow-y: auto; border: 1px solid var(--line2); border-radius: 8px; padding: 6px 10px; }
+.shotlive { max-width: 720px; }
+@media (max-width: 700px) { main { padding: 20px 16px 40px; } header.top h1 { font-size: 22px; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <nav class="side" aria-label="Main">
+    <div class="brand">
+      <svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true"><rect x="1" y="1" width="28" height="28" rx="8" fill="#4338CA"></rect><path d="M9 10h12M15 10v11" stroke="#fff" stroke-width="2.4" stroke-linecap="round" fill="none"></path><circle cx="21.5" cy="20.5" r="2.5" fill="#7FE0A8"></circle></svg>
+      <div><b>TraceQA</b><span>Requirement-driven testing</span></div>
+    </div>
+    <div class="proj"><div class="k">Project</div><div class="v" id="projName">…</div><div class="u" id="projUrl"></div></div>
+    <a class="running" id="running" href="#/jobs"></a>
+    <div class="navlinks" id="navlinks">
+      <a href="#/" data-view="overview"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="3" y="3" width="6" height="6" rx="1.5"/><rect x="11" y="3" width="6" height="6" rx="1.5"/><rect x="3" y="11" width="6" height="6" rx="1.5"/><rect x="11" y="11" width="6" height="6" rx="1.5"/></svg>Overview</a>
+      <a href="#/requirements" data-view="requirements"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M4 5.5l1.2 1.2 2.3-2.2M4 10.5l1.2 1.2 2.3-2.2M4 15.5h3M10 5.5h6M10 10.5h6M10 15.5h6"/></svg>Requirements</a>
+      <a href="#/appmap" data-view="appmap"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="5" cy="5" r="2"/><circle cx="15" cy="5" r="2"/><circle cx="10" cy="15" r="2"/><path d="M7 5h6M6 6.8l3 6.4M14 6.8l-3 6.4"/></svg>App map</a>
+      <a href="#/sessions" data-view="sessions"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="10" cy="10" r="7"/><path d="M13 7l-1.8 4.2L7 13l1.8-4.2z"/></svg>Explorer</a>
+      <a href="#/tests" data-view="tests"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M7 6l-4 4 4 4M13 6l4 4-4 4"/></svg>Framework</a>
+      <a href="#/runs" data-view="runs"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M6.5 4.5v11l9-5.5z"/></svg>Runs &amp; heals</a>
+      <a href="#/bugs" data-view="bugs"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M7 7a3 3 0 0 1 6 0v1H7zM5 8h10v4a5 5 0 0 1-10 0zM10 13v4M3 11h2M15 11h2"/></svg>Bugs</a>
+      <div class="navsep" role="presentation"></div>
+      <a href="#/agent" data-view="agent"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M10 3l1.6 4.4L16 9l-4.4 1.6L10 15l-1.6-4.4L4 9l4.4-1.6z"/><path d="M15.5 13.5l.6 1.4 1.4.6-1.4.6-.6 1.4-.6-1.4-1.4-.6 1.4-.6z"/></svg>AI agent</a>
+      <a href="#/jobs" data-view="jobs"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="10" cy="10" r="7"/><path d="M10 6v4l2.5 2"/></svg>Jobs</a>
+      <a href="#/settings" data-view="settings"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="10" cy="10" r="2.6"/><path d="M10 2.5v2.2M10 15.3v2.2M2.5 10h2.2M15.3 10h2.2M4.7 4.7l1.6 1.6M13.7 13.7l1.6 1.6M4.7 15.3l1.6-1.6M13.7 6.3l1.6-1.6"/></svg>Settings</a>
+    </div>
+    <div class="live"><span class="dot" id="liveDot" style="background:#8A92A3"></span><span id="liveText">Connecting…</span></div>
+  </nav>
+  <main id="main" aria-live="polite"><p class="empty">Loading…</p></main>
+</div>
+<div class="toast" id="toast" role="status"></div>
+<dialog id="dlg" aria-labelledby="dlgTitle"><form method="dialog" id="dlgForm"><h2 id="dlgTitle"></h2><div id="dlgBody" class="stack" style="gap:12px"></div><div class="dlg-actions"><button value="cancel" formnovalidate>Cancel</button><button value="ok" class="primary" id="dlgOk">OK</button></div></form></dialog>
+
+<script>
+const STATUS = {
+  covered: ['Covered', 'var(--covered)'], failing: ['Failing', 'var(--failing)'], partial: ['Partial', 'var(--partial)'],
+  ambiguous: ['Ambiguous', 'var(--ambiguous)'], 'not-run': ['Not run yet', 'var(--notrun)'], 'not-covered': ['Not covered', 'var(--notcovered)'],
+};
+const ORDER = ['covered', 'failing', 'partial', 'ambiguous', 'not-run', 'not-covered'];
+const RESULT = { passed: ['Passed', 'var(--covered)'], failed: ['Failed', 'var(--failing)'], flaky: ['Flaky', 'var(--partial)'], skipped: ['Skipped', 'var(--notcovered)'] };
+const BUG = { draft: ['Draft', 'var(--partial)'], approved: ['Approved', 'var(--ambiguous)'], filed: ['Filed', 'var(--covered)'], discarded: ['Discarded', 'var(--notcovered)'] };
+const HEAL = { applied: ['Applied', 'var(--covered)'], proposed: ['Proposed', 'var(--ambiguous)'], failed: ['Not healed', 'var(--failing)'], rejected: ['Rejected', 'var(--notcovered)'] };
+const JOB = { queued: ['Queued', 'var(--notrun)'], running: ['Running', 'var(--ambiguous)'], done: ['Done', 'var(--covered)'], failed: ['Failed', 'var(--failing)'], stopped: ['Stopped', 'var(--notcovered)'] };
+const REQ_TEMPLATE = `# Feature name
+
+## REQ-200 Short title of the requirement
+Optional description.
+- AC1: What a test should check, with exact text or numbers
+- AC2: Another observable outcome
+`;
+let reqFilter = 'all';
+let bugFilter = 'open';
+const S = { state: null, reqs: null, jobs: [] };
+
+const $ = (s, root = document) => root.querySelector(s);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const when = (iso) => (iso ? new Date(iso).toLocaleString() : '');
+const chip = (map, key) => { const s = map[key] || [key, 'var(--notrun)']; return `<span class="chip"><span class="dot" style="background:${s[1]}"></span>${esc(s[0])}</span>`; };
+const lines = (v) => String(v || '').split('\n').map((x) => x.trim()).filter(Boolean);
+const enc = encodeURIComponent;
+function dur(a, b) { if (!a) return ''; const ms = (b ? new Date(b) : new Date()) - new Date(a); const s = Math.round(ms / 1000); return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${s % 60} s`; }
+function fmtTokens(n) { return n >= 1000 ? (n / 1000).toFixed(n >= 100000 ? 0 : 1) + 'k' : String(n); }
+function fmtUsage(u) {
+  if (!u) return '';
+  const total = u.inputTokens + u.outputTokens + u.cacheReadTokens + u.cacheWriteTokens;
+  return `${fmtTokens(total)} tokens${u.costUsd !== undefined && u.costUsd !== null ? ` · about $${u.costUsd.toFixed(2)}` : ''}`;
+}
+
+async function api(path, opts) {
+  const res = await fetch(path, opts);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(data.error || res.statusText), { status: res.status });
+  return data;
+}
+const post = (path, body) => api(path, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-TraceQA': '1' }, body: JSON.stringify(body || {}) });
+
+function q(s) { return "'" + String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "'"; }
+function locatorCode(l) {
+  switch (l.by) {
+    case 'role': return l.name === undefined ? `getByRole(${q(l.role)})` : `getByRole(${q(l.role)}, { name: ${q(l.name)}${l.exact ? ', exact: true' : ''} })`;
+    case 'label': return `getByLabel(${q(l.label)})`;
+    case 'testId': return `getByTestId(${q(l.testId)})`;
+    case 'placeholder': return `getByPlaceholder(${q(l.placeholder)})`;
+    case 'text': return `getByText(${q(l.text)})`;
+    default: return `locator(${q(l.selector)})`;
+  }
+}
+
+function header(title, sub, buttons) {
+  return `<div class="updbar" id="updbar" role="status"><span>This page has new data.</span><button class="sm" data-action="refresh">Refresh</button></div><header class="top"><div><div class="sub">${sub || ''}</div><h1>${esc(title)}</h1></div><div class="btns">${buttons || ''}</div></header>`;
+}
+const btn = (action, label, attrs = '', cls = '') => `<button type="button" class="${cls}" data-action="${action}" ${attrs}>${esc(label)}</button>`;
+
+function coverageBar(summary) {
+  const parts = ORDER.filter((s) => summary[s] > 0);
+  const bar = parts.map((s) => `<div title="${STATUS[s][0]} · ${summary[s]}" style="flex:${summary[s]} 1 0;background:${STATUS[s][1]}"></div>`).join('');
+  const legend = parts.map((s) => `<span><span class="sw" style="background:${STATUS[s][1]}"></span>${STATUS[s][0]} ${summary[s]}</span>`).join('');
+  const label = parts.map((s) => `${summary[s]} ${STATUS[s][0]}`).join(', ');
+  return `<div class="bar" role="img" aria-label="${esc(label)}">${bar || '<div style="flex:1;background:var(--line)"></div>'}</div><div class="legend">${legend}</div>`;
+}
+
+async function reqList(force) {
+  if (!S.reqs || force) S.reqs = (await api('/api/requirements')).rows;
+  return S.reqs;
+}
+const reqOptions = (reqs, selected) => reqs.map((r) => `<option value="${esc(r.requirementId)}" ${r.requirementId === selected ? 'selected' : ''}>${esc(r.requirementId)} · ${esc(r.title)}</option>`).join('');
+
+// ---------- dialogs ----------
+
+function openDialog({ title, body, ok = 'OK', danger = false, wide = false }) {
+  return new Promise((resolve) => {
+    const d = $('#dlg');
+    $('#dlgTitle').textContent = title;
+    $('#dlgBody').innerHTML = body;
+    const okBtn = $('#dlgOk');
+    okBtn.textContent = ok;
+    okBtn.className = danger ? 'danger-fill' : 'primary';
+    d.classList.toggle('wide', wide);
+    d.returnValue = '';
+    // Answer from the button press itself rather than the dialog's close event, which browsers can delay.
+    const form = $('#dlgForm');
+    let done = false;
+    const finish = (ok) => {
+      if (done) return;
+      done = true;
+      const fd = ok ? new FormData(form) : null;
+      if (d.open) d.close(ok ? 'ok' : 'cancel');
+      resolve(fd);
+    };
+    form.onsubmit = (e) => { e.preventDefault(); finish(e.submitter ? e.submitter.value === 'ok' : true); };
+    d.oncancel = (e) => { e.preventDefault(); finish(false); };
+    d.onclose = () => finish(d.returnValue === 'ok');
+    d.showModal();
+    const first = $('#dlgBody [autofocus]') || $('#dlgBody input:not([type=hidden]), #dlgBody select, #dlgBody textarea');
+    if (first) first.focus();
+  });
+}
+async function confirmBox(title, html, ok = 'OK', danger = false) {
+  return !!(await openDialog({ title, body: html, ok, danger }));
+}
+function aiFacts() {
+  const ai = S.state.ai;
+  const recent = (ai.recent || []).slice(0, 3).map((r) => `<li>${esc(r.id)} · ${esc(r.label)} · ${esc(fmtUsage(r.usage))}</li>`).join('');
+  const who = ai.provider === 'openrouter' ? 'OpenRouter' : 'Anthropic';
+  return `<div class="warnbox"><b>This uses ${esc(ai.model)} and is billed to your ${who} account.</b><ul class="facts"><li>Provider ${who}, effort ${esc(ai.effort)}, at most ${ai.maxTurns} turns (change in <a href="#/settings">Settings</a>)</li><li>You can stop it at any time from Jobs.</li><li>It never approves, files or deletes anything.</li></ul></div>
+    ${ai.configured ? '' : `<div class="error">No ${who} API key is set (<span class="mono">${esc(ai.keyName)}</span>). Add one in <a href="#/settings">Settings</a> first, or the job will fail.</div>`}
+    ${recent ? `<div class="sub">Recent AI jobs:<ul class="facts">${recent}</ul></div>` : ''}`;
+}
+
+async function startJob(body) {
+  const r = await post('/api/jobs', body);
+  toast(`<b>${esc(r.job.label)}</b> ${r.job.status === 'queued' ? 'queued' : 'started'}. <a href="#/jobs/${enc(r.job.id)}">Watch it</a>`, 6000);
+  refreshJobs();
+  return r.job;
+}
+
+async function runDialog(preset = {}) {
+  const reqs = await reqList();
+  const browsers = S.state.browsers || ['chromium'];
+  const scope = preset.testId ? 'test' : preset.requirementId ? 'req' : 'all';
+  const fd = await openDialog({
+    title: 'Run tests',
+    ok: 'Run',
+    body: `<fieldset><legend>Which tests</legend>
+      ${preset.testId ? `<label class="radio"><input type="radio" name="scope" value="test" checked> Only <span class="mono">${esc(preset.testId)}</span></label>` : ''}
+      <label class="radio"><input type="radio" name="scope" value="all" ${scope === 'all' ? 'checked' : ''}> All tests</label>
+      <label class="radio"><input type="radio" name="scope" value="req" ${scope === 'req' ? 'checked' : ''}> One requirement <select name="requirementId" aria-label="Requirement">${reqOptions(reqs, preset.requirementId)}</select></label>
+      <label class="radio"><input type="radio" name="scope" value="grep"> Test titles matching <input name="grep" aria-label="Title pattern" placeholder="e.g. coupon"></label></fieldset>
+      <label class="field">Browser <select name="browser"><option value="">All configured (${esc(browsers.join(', '))})</option>${browsers.map((b) => `<option>${esc(b)}</option>`).join('')}</select></label>
+      <p class="sub">Failures are sorted into app bugs (a draft bug is created), broken tests, flaky tests and environment problems.</p>`,
+  });
+  if (!fd) return;
+  const s = fd.get('scope');
+  return startJob({ kind: 'run', testId: s === 'test' ? preset.testId : undefined, requirementId: s === 'req' ? fd.get('requirementId') : undefined, grep: s === 'grep' ? fd.get('grep') : undefined, browser: fd.get('browser') || undefined });
+}
+
+async function healDialog() {
+  await refreshState();
+  const fd = await openDialog({
+    title: 'Heal broken tests',
+    ok: 'Start',
+    body: `<p>Finds tests that broke because an element could not be found (usually after a UI change), replays them, and swaps in the closest match on the page. Assertions are never changed, so real bugs stay visible.</p>
+      <fieldset><legend>Mode</legend>
+      <label class="radio"><input type="radio" name="mode" value="apply" checked> Heal and re-run each test (the original is put back if a heal does not help)</label>
+      <label class="radio"><input type="radio" name="mode" value="preview"> Preview only: propose fixes, then apply or reject each one</label></fieldset>
+      <label class="check"><input type="checkbox" name="ai" value="1"> Then hand tests that cannot be healed to the AI agent (billed)</label>
+      <div class="sub">If there are no test results yet, the tests run first.</div>`,
+  });
+  if (!fd) return;
+  const dryRun = fd.get('mode') === 'preview';
+  const ai = fd.get('ai') === '1' && !dryRun;
+  if (ai && !(await confirmBox('Use the AI agent for what is left?', aiFacts(), 'Start (billed)'))) return;
+  return startJob({ kind: 'heal', dryRun, ai, confirmed: ai || undefined });
+}
+
+async function exploreDialog(reqId) {
+  const reqs = await reqList();
+  await refreshState();
+  if (!reqs.length) return toast('Import requirements first.', 4000);
+  const fd = await openDialog({
+    title: 'Explore with AI',
+    ok: 'Start (billed)',
+    wide: true,
+    body: `<p>The agent opens the app in a browser, tries each acceptance criterion with edge cases, and records real problems as draft bugs with screenshots. It does not write tests.</p>
+      <label class="field">Requirement <select name="requirementId" required>${reqOptions(reqs, reqId)}</select></label>
+      <label class="field">Focus (optional) <textarea name="charter" rows="2" placeholder="e.g. Try lowercase, expired and empty coupon codes"></textarea></label>
+      <label class="check"><input type="checkbox" name="headed" value="1"> Show the browser window on this computer so I can watch</label>
+      ${aiFacts()}`,
+  });
+  if (!fd) return;
+  return startJob({ kind: 'explore', requirementId: fd.get('requirementId'), charter: fd.get('charter') || undefined, headed: fd.get('headed') === '1', confirmed: true });
+}
+
+async function generateDialog(reqIds = []) {
+  const reqs = await reqList();
+  await refreshState();
+  if (!reqs.length) return toast('Import requirements first.', 4000);
+  const gaps = reqs.filter((r) => r.status === 'not-covered' || r.status === 'partial');
+  const scope = reqIds.length ? 'pick' : 'gaps';
+  const fd = await openDialog({
+    title: 'Write tests with AI',
+    ok: 'Start (billed)',
+    wide: true,
+    body: `<p>The agent writes one test per acceptance criterion, checks each by running it, then runs them all. Unclear criteria are skipped and listed in the summary.</p>
+      <fieldset><legend>Requirements</legend>
+      <label class="radio"><input type="radio" name="scope" value="gaps" ${scope === 'gaps' ? 'checked' : ''} ${gaps.length ? '' : 'disabled'}> Every gap: ${gaps.length ? esc(gaps.map((g) => g.requirementId).join(', ')) : 'none, all criteria have tests'}</label>
+      <label class="radio"><input type="radio" name="scope" value="pick" ${scope === 'pick' ? 'checked' : ''}> These requirements:</label>
+      <div class="checks">${reqs.map((r) => `<label class="check"><input type="checkbox" name="req" value="${esc(r.requirementId)}" ${reqIds.includes(r.requirementId) ? 'checked' : ''}> ${esc(r.requirementId)} · ${esc(r.title)} ${chip(STATUS, r.status)}</label>`).join('')}</div>
+      <label class="radio"><input type="radio" name="scope" value="all"> All ${reqs.length} requirements</label></fieldset>
+      ${aiFacts()}`,
+  });
+  if (!fd) return;
+  const s = fd.get('scope');
+  const picked = fd.getAll('req');
+  if (s === 'pick' && !picked.length) return toast('Pick at least one requirement.', 4000);
+  return startJob({ kind: 'generate', requirementIds: s === 'pick' ? picked : undefined, gaps: s === 'gaps', all: s === 'all', confirmed: true });
+}
+
+async function agentTask(task) {
+  await refreshState();
+  const ok = await confirmBox('Start this AI task?', `<pre class="result">${esc(task)}</pre>${aiFacts()}`, 'Start (billed)');
+  if (!ok) return;
+  return startJob({ kind: 'agent', task, confirmed: true });
+}
+
+// ---------- views ----------
+
+const views = {
+  async setup() {
+    const st = S.state;
+    return header('Set up TraceQA', `Folder: <span class="mono">${esc(st.dir)}</span>`) +
+      `<section class="card"><form data-form="setup" class="stack">
+        <p>This folder has no TraceQA project yet. Fill in what you know; everything can be changed later in Settings.</p>
+        <label class="field">App address (a test or staging site, never production) <input type="url" name="baseUrl" required placeholder="https://staging.your-app.example" autofocus></label>
+        <label class="check"><input type="checkbox" name="hasAuth" value="1" data-toggle="#setupAuth"> The app needs a sign-in for some pages</label>
+        <fieldset id="setupAuth" hidden><legend>Sign-in</legend><div class="fields">
+          <label class="field">Sign-in page path <input name="loginPath" placeholder="/login"></label>
+          <label class="field">User name field label <input name="usernameLabel" placeholder="Email"></label>
+          <label class="field">Password field label <input name="passwordLabel" placeholder="Password"></label>
+          <label class="field">Sign-in button text <input name="submitButton" placeholder="Sign in"></label>
+          <label class="field">Test account user name <input name="testUser" autocomplete="off"><span class="hint">A test account, never a real customer's.</span></label>
+          <label class="field">Test account password <input type="password" name="testPassword" autocomplete="new-password"><span class="hint">Saved to .env only; never shown again.</span></label>
+        </div></fieldset>
+        <label class="check"><input type="checkbox" name="agents" value="1" checked> Also connect AI coding tools (Claude Code, Cursor, Codex, Antigravity)</label>
+        <div><button class="primary" type="submit">Set up project</button></div>
+      </form></section>`;
+  },
+
+  async overview() {
+    const d = await api('/api/overview');
+    const k = d.kpis, s = d.summary, lr = k.lastRun;
+    const rate = lr && lr.total ? Math.round(((lr.passed + lr.flaky) / lr.total) * 100) + '%' : '—';
+    const features = d.features.map((f) => {
+      const tested = (f.counts.covered || 0) + (f.counts.failing || 0);
+      const bar = ORDER.filter((x) => f.counts[x]).map((x) => `<div title="${STATUS[x][0]} · ${f.counts[x]}" style="flex:${f.counts[x]} 1 0;background:${STATUS[x][1]}"></div>`).join('');
+      return `<tr><td>${esc(f.feature)}</td><td class="num">${f.total}</td><td style="width:45%"><div class="bar" style="height:8px">${bar}</div></td><td class="num">${Math.round((tested / f.total) * 100)}%</td></tr>`;
+    }).join('');
+    const stepAction = {
+      analyze: () => btn('job', 'Analyze', 'data-kind="analyze"', 'sm'),
+      requirements: () => `<a class="btn sm" href="#/requirements/files">Edit files</a>`,
+      map: () => btn('map', 'Map', '', 'sm'),
+      framework: (p) => btn('job', p.done ? 'Refresh' : 'Create', 'data-kind="scaffold"', 'sm'),
+      tests: () => btn('generate', 'Write with AI', '', 'sm ai'),
+      run: () => btn('run-dialog', 'Run', '', 'sm'),
+      bugs: () => `<a class="btn sm" href="#/bugs">Review</a>`,
+    };
+    const next = d.pipeline.find((p) => !p.done);
+    const nextText = {
+      analyze: 'Analyze the app so TraceQA learns its pages.',
+      requirements: 'Add your requirements as Markdown files.',
+      map: 'Link each requirement to the pages it is about.',
+      framework: 'Create the Playwright test framework.',
+      tests: 'Write tests for each acceptance criterion (with AI, or from your AI coding tool).',
+      run: 'Run the tests.',
+      bugs: 'Review the draft bugs.',
+    };
+    return header('Overview', `${esc(d.baseUrl)}`, btn('heal-dialog', 'Heal…') + btn('run-dialog', 'Run tests…', '', 'primary')) +
+      (next ? `<section class="card next"><div><div class="sub">Next step</div><b>${esc(nextText[next.key] || next.step)}</b></div><div class="btns">${stepAction[next.key](next)}</div></section>` : '') +
+      `<section class="card"><h2>Pipeline</h2><ol class="pipeline">${d.pipeline.map((p, i) => `<li><div class="hd"><span class="ic ${p.done ? 'ok' : 'todo'}">${p.done ? '✓' : i + 1}</span><span><b>${esc(p.step)}</b><br><span class="sub">${esc(p.detail)}</span></span></div><div class="act">${stepAction[p.key] ? stepAction[p.key](p) : ''}</div></li>`).join('')}</ol></section>
+      <section class="kpis">
+        <div class="card kpi"><span class="sub">Requirements tested</span><b>${s.percentTested}%</b><span class="sub">${s.covered + s.failing} of ${s.total} requirements</span></div>
+        <div class="card kpi"><span class="sub">Tests</span><b>${k.tests}</b><span class="sub">across ${k.requirementsWithTests} requirements</span></div>
+        <div class="card kpi"><span class="sub">Last run pass rate</span><b>${rate}</b><span class="sub">${lr ? `${esc(lr.id)} · ${lr.passed} of ${lr.total} passed` : 'No run yet'}</span></div>
+        <div class="card kpi"><span class="sub">Open bugs</span><b>${k.openBugs}</b><span class="sub">${k.drafts} drafts · ${k.filed} filed</span></div>
+      </section>
+      <div class="row">
+        <section class="card grow2"><h2>Requirement coverage <a href="#/requirements" style="float:right;font-size:13px;font-weight:500">Open requirements →</a></h2>${coverageBar(s)}
+          <div class="tbl"><table><thead><tr><th>Feature</th><th class="num">Requirements</th><th>Coverage</th><th class="num">Tested</th></tr></thead><tbody>${features || '<tr><td colspan="4" class="empty">No requirements imported yet.</td></tr>'}</tbody></table></div>
+          <div class="btns" style="margin-top:12px">${btn('job', 'Build coverage report', 'data-kind="report"', 'sm')}<a class="btn sm" href="#/report">Open report</a></div></section>
+        <div class="grow1 stack">
+          <section class="card"><h2>Needs your attention</h2>${d.attention.length ? `<ul class="plain">${d.attention.map((a) => `<li><a href="${a.link}"><b>${esc(a.text)}</b></a><div class="sub">${esc(a.detail)}</div></li>`).join('')}</ul>` : '<p class="empty">Nothing right now.</p>'}</section>
+          <section class="card"><h2>Recent jobs <a href="#/jobs" style="float:right;font-size:13px;font-weight:500">All jobs →</a></h2>${d.jobs.length ? `<ul class="plain">${d.jobs.map((j) => `<li><a href="#/jobs/${enc(j.id)}"><b>${esc(j.label)}</b></a> ${chip(JOB, j.status)}${j.ai ? ' <span class="tag ai">AI</span>' : ''}<div class="sub">${when(j.createdAt)}${j.usage ? ' · ' + esc(fmtUsage(j.usage)) : ''}</div></li>`).join('')}</ul>` : '<p class="empty">Jobs you start appear here.</p>'}</section>
+        </div>
+      </div>`;
+  },
+
+  async report() {
+    const r = await api('/api/report');
+    return header('Coverage report', '<a href="#/">Overview</a>', btn('job', 'Rebuild report', 'data-kind="report"', 'primary')) +
+      (r.exists ? `<section class="card"><p class="sub">Built ${when(r.updatedAt)} · <a href="${esc(r.url)}" target="_blank" rel="noopener">Open in a new tab</a></p><iframe title="Coverage report" src="${esc(r.url)}" style="width:100%;height:75vh;border:1px solid var(--line);border-radius:8px;background:#fff"></iframe></section>`
+        : '<p class="empty">No report yet. Click “Rebuild report”.</p>');
+  },
+
+  async requirements(id, file) {
+    if (id === 'files') return views.reqFiles(file);
+    if (id) return views.requirement(id);
+    const d = await api('/api/requirements');
+    S.reqs = d.rows;
+    const counts = { all: d.rows.length };
+    for (const r of d.rows) counts[r.status] = (counts[r.status] || 0) + 1;
+    const rows = d.rows.filter((r) => reqFilter === 'all' || r.status === reqFilter);
+    const filters = ['all', ...ORDER].filter((f) => counts[f]).map((f) => `<button data-action="req-filter" data-f="${f}" aria-pressed="${reqFilter === f}">${f === 'all' ? 'All' : STATUS[f][0]} ${counts[f]}</button>`).join('');
+    return header('Requirements', 'Each requirement traced to its criteria, tests, results and bugs', btn('import', 'Re-import') + btn('map', 'Map to pages') + `<a class="btn" href="#/requirements/files">Edit requirement files</a>` + btn('generate', 'Write tests for gaps', '', 'primary ai')) +
+      `<nav class="filters" aria-label="Requirements views"><a class="btn" href="#/requirements" aria-current="page">Requirements</a><a class="btn" href="#/requirements/files">Files</a></nav>
+      ${d.rows.length ? `<div class="filters" role="group" aria-label="Filter by status">${filters}</div>` : ''}
+      <section class="card" style="padding:6px 0 0"><div class="tbl"><table><thead><tr><th style="padding-left:20px">ID</th><th>Requirement</th><th>Criteria tested</th><th class="num">Tests</th><th>Status</th><th>Bugs</th></tr></thead><tbody>
+      ${rows.map((r) => `<tr class="click" data-href="#/requirements/${enc(r.requirementId)}"><td class="mono" style="padding-left:20px"><a href="#/requirements/${enc(r.requirementId)}">${esc(r.requirementId)}</a></td><td>${esc(r.title)}<div class="sub">${esc(r.feature)}${r.issues.length ? ` · ${r.issues.length} issue(s)` : ''}</div></td><td>${r.criteria.filter((c) => c.tests).length} of ${r.criteria.length}</td><td class="num">${r.tests}</td><td>${chip(STATUS, r.status)}</td><td>${r.bugs.map((b) => `<a href="#/bugs/${enc(b)}">${esc(b)}</a>`).join(', ')}</td></tr>`).join('') || '<tr><td colspan="6" class="empty" style="padding-left:20px">No requirements yet. <a href="#/requirements/files/new">Add a requirement file</a>.</td></tr>'}
+      </tbody></table></div></section>`;
+  },
+
+  async reqFiles(file) {
+    const d = await api('/api/requirement-files');
+    const isNew = file === 'new' || (!file && !d.files.length);
+    const current = isNew ? null : d.files.find((f) => f.file === file) || d.files[0];
+    const content = current ? (await api(`/api/requirement-files/content?file=${enc(current.file)}`)).content : REQ_TEMPLATE;
+    const list = d.files.map((f) => `<a class="item" href="#/requirements/files/${enc(f.file)}" aria-current="${!!current && f.file === current.file}"><b class="mono">${esc(f.file)}</b><div class="sub">${f.requirements} requirement(s) · ${when(f.updatedAt)}</div></a>`).join('');
+    return header('Requirement files', `<a href="#/requirements">Requirements</a> · Markdown files in <span class="mono">${esc(d.dir)}/</span>`, `<a class="btn" href="#/requirements/files/new">New file</a>${btn('upload', 'Upload .md')}<input id="uploadMd" type="file" accept=".md,text/markdown" hidden aria-label="Requirement file to upload">`) +
+      `<nav class="filters" aria-label="Requirements views"><a class="btn" href="#/requirements">Requirements</a><a class="btn" href="#/requirements/files" aria-current="page">Files</a></nav>
+      <div class="split"><div class="list card" style="padding:8px">${list || '<p class="empty" style="padding:8px">No files yet.</p>'}</div>
+      <div class="detail stack"><section class="card"><form data-form="reqfile" class="stack" data-previous="${esc(current ? current.file : '')}">
+        <label class="field">File name <input name="file" required value="${esc(current ? current.file : 'new-feature.md')}" pattern="[A-Za-z0-9 _.\\-/]+\\.md" title="Letters, numbers, spaces, dashes and underscores, ending in .md"></label>
+        <label class="field">Content <textarea class="editor" name="content" spellcheck="true" id="reqEditor">${esc(content)}</textarea>
+          <span class="hint">A requirement is a heading that starts with an ID like REQ-142. Bullets under it are acceptance criteria. A top-level # heading sets the feature.</span></label>
+        <div class="btns"><button class="primary" type="submit">Save and import</button>${current ? btn('reqfile-delete', 'Move to trash', `data-file="${esc(current.file)}"`, 'danger') : ''}</div>
+      </form></section>
+      <section class="card"><h2>What TraceQA will read</h2><div id="reqPreview" class="sub">Checking…</div></section></div></div>`;
+  },
+
+  async requirement(id) {
+    const d = await api(`/api/requirements/${enc(id)}`);
+    const r = d.requirement, c = d.coverage;
+    const crit = r.criteria.map((ac) => {
+      const cc = c.criteria.find((x) => x.acId === ac.id) || { tests: 0, passed: 0, failed: 0 };
+      const vague = ac.issues.some((i) => i.kind === 'vague');
+      return `<div class="ac ${cc.failed ? 'bad' : ''}"><div style="display:flex;gap:10px;justify-content:space-between;flex-wrap:wrap"><span><span class="mono">${esc(ac.id)}</span> ${esc(ac.text)}${ac.clarified ? ' <span class="tag">clarified</span>' : ''}</span>
+        <span class="sub">${cc.tests} test(s) · ${cc.passed} passed · ${cc.failed} failed</span></div>
+        ${ac.issues.map((i) => `<div class="issue">${esc(i.message)}</div>`).join('')}
+        <details ${vague ? 'open' : ''} style="margin-top:6px"><summary class="sub">${vague ? 'Testable wording agreed with the team' : 'Clarify the wording'}</summary><form class="inline" data-form="clarify" data-req="${esc(r.id)}" data-ac="${esc(ac.id)}"><input name="text" aria-label="New wording for ${esc(ac.id)}" placeholder="e.g. Results appear within 2 seconds" required><button type="submit">Save</button></form></details></div>`;
+    }).join('');
+    const tests = d.tests.map((t) => `<li><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><span><b>${esc(t.acId ? t.acId + ' · ' : '')}${esc(t.title)}</b> ${t.last ? chip(RESULT, t.last.status) : ''}${t.signedIn ? ' <span class="tag">signed in</span>' : ''}</span><span class="btns">${btn('run-test', 'Run', `data-test="${esc(t.id)}"`, 'sm')}${btn('remove-test', 'Remove', `data-test="${esc(t.id)}"`, 'sm danger')}</span></div><ol class="sub">${t.steps.map((s) => `<li>${esc(s)}</li>`).join('')}</ol></li>`).join('');
+    return header(`${r.id} · ${r.title}`, `<a href="#/requirements">Requirements</a> · ${esc(r.feature)} · <a href="#/requirements/files/${enc(d.sourceFile)}">${esc(r.source.file)}:${r.source.line}</a>`,
+      btn('explore', 'Explore with AI', `data-req="${esc(r.id)}"`, 'ai') + btn('generate', 'Write tests with AI', `data-req="${esc(r.id)}"`, 'ai') + btn('run-req', `Run ${r.id} tests`, `data-req="${esc(r.id)}"`, 'primary')) +
+      `<div class="row"><section class="card grow2"><h2>Acceptance criteria ${chip(STATUS, c.status)}</h2>${r.description ? `<p>${esc(r.description)}</p>` : ''}${crit || '<p class="empty">No acceptance criteria. Add bullets under the heading in the requirement file.</p>'}</section>
+      <div class="grow1 stack">
+        <section class="card"><h2>Mapped pages</h2>${d.pages.length ? d.pages.map((p) => `<a class="tag mono" href="#/appmap/${enc(p.pageId)}">${esc(p.page || p.pageId)}</a>`).join(' ') : '<p class="empty">None yet.</p>'}<div style="margin-top:8px">${btn('map', 'Re-map', '', 'sm')}</div></section>
+        <section class="card"><h2>Bugs</h2>${d.bugs.length ? `<ul class="plain">${d.bugs.map((b) => `<li><a href="#/bugs/${enc(b.id)}">${esc(b.id)}</a> ${chip(BUG, b.status)}<div>${esc(b.title)}</div></li>`).join('')}</ul>` : '<p class="empty">No bugs.</p>'}</section>
+      </div></div>
+      <section class="card"><h2>Tests${d.specFile ? ` <a class="mono" style="font-weight:400" href="#/tests/${enc(r.id)}">${esc(d.specFile)}</a>` : ''}</h2>${tests ? `<ul class="plain">${tests}</ul>` : `<p class="empty">No tests yet. Click “Write tests with AI”, or ask your AI coding tool.</p>`}</section>`;
+  },
+
+  async appmap(id) {
+    const d = await api('/api/appmap');
+    const page = d.pages.find((p) => p.id === id) || d.pages[0];
+    const list = d.pages.map((p) => `<a class="item" href="#/appmap/${enc(p.id)}" aria-current="${!!page && p.id === page.id}"><b>${esc(p.name)}</b><div class="sub mono">${esc(p.templatePath)}</div><div class="sub">${p.elements.length} elements · ${esc(p.source)}${p.requirements.length ? ' · ' + esc(p.requirements.join(', ')) : ' · no requirement'}</div></a>`).join('');
+    const detail = page ? `<section class="card"><h2>${esc(page.name)} <span class="sub mono">${esc(page.templatePath)} · ${esc(page.className)}</span></h2>
+      <p class="sub">Updated ${when(page.updatedAt)} · ${page.forms} form(s) · headings: ${esc(page.headings.join(' | '))}</p>
+      <div class="tbl"><table><thead><tr><th>Key</th><th>Element</th><th>Locator</th><th>Stability</th></tr></thead><tbody>
+      ${page.elements.map((e) => `<tr><td class="mono">${esc(e.key)}</td><td>${esc(e.role)} “${esc(e.name)}”</td><td class="mono">${esc(locatorCode(e.locator))}</td><td>${chip({ stable: ['Stable', 'var(--covered)'], fragile: ['Fragile', 'var(--partial)'], ambiguous: ['Ambiguous', 'var(--failing)'] }, e.stability)}</td></tr>`).join('')}
+      </tbody></table></div></section>` : '<p class="empty">The app map is empty. Click “Analyze app”.</p>';
+    return header('App map', `${d.pages.length} pages${d.updatedAt ? ' · updated ' + when(d.updatedAt) : ''}${d.pagesWithoutRequirements.length ? ' · no requirement: ' + esc(d.pagesWithoutRequirements.join(', ')) : ''}`, btn('map', 'Map requirements') + btn('job', d.pages.length ? 'Re-analyze app' : 'Analyze app', 'data-kind="analyze"', 'primary')) +
+      `<div class="split"><div class="list card" style="padding:8px">${list || '<p class="empty">No pages.</p>'}</div><div class="detail">${detail}</div></div>`;
+  },
+
+  async sessions(id) {
+    const d = await api('/api/sessions');
+    const head = header('Explorer', 'Exploration sessions run by the AI agent or your AI coding tool', btn('explore', 'Explore with AI…', '', 'primary ai'));
+    if (!d.sessions.length) return head + '<p class="empty">No sessions yet. Click “Explore with AI…” to start one.</p>';
+    const s = d.sessions.find((x) => x.id === id) || d.sessions[0];
+    const list = d.sessions.map((x) => `<a class="item" href="#/sessions/${enc(x.id)}" aria-current="${x.id === s.id}"><b>${esc(x.id)}</b>${x.requirementId ? ' · ' + esc(x.requirementId) : ''}${x.live ? ' <span class="chip"><span class="dot pulse" style="background:var(--failing)"></span>Live</span>' : ''}<div class="sub">${esc(x.charter)}</div><div class="sub">${x.steps.length} steps · ${x.findings.length} findings · ${when(x.startedAt)}</div></a>`).join('');
+    const findings = s.findings.map((f) => `<li><b>${esc(f.title)}</b> <span class="tag">${esc(f.severity)}</span> → <a href="#/bugs/${enc(f.bugId)}">${esc(f.bugId)}</a><div class="ea" style="margin-top:6px"><div><b>Expected</b><br>${esc(f.expected)}</div><div><b>Actual</b><br>${esc(f.actual)}</div></div>${f.screenshot ? `<img class="shot" style="margin-top:8px;max-width:520px" loading="lazy" src="${esc(f.screenshot)}" alt="Screenshot for ${esc(f.title)}">` : ''}</li>`).join('');
+    const steps = s.steps.map((st) => `<figure>${st.screenshot ? `<a href="${esc(st.screenshot)}" target="_blank" rel="noopener"><img loading="lazy" src="${esc(st.screenshot)}" alt="Step ${st.n}"></a>` : ''}<figcaption>${st.n}. ${st.ok ? '' : '<b style="color:var(--danger)">Failed:</b> '}${esc(st.detail)}${st.error ? '<br>' + esc(st.error) : ''}</figcaption></figure>`).join('');
+    return head +
+      `<div class="split"><div class="list card" style="padding:8px">${list}</div><div class="detail stack">
+      <section class="card"><h2>${esc(s.id)} · ${esc(s.charter)}</h2><p class="sub">${s.live ? 'Running now · ' : ''}Pages: ${esc(s.pages.join(', '))} · console errors ${s.consoleErrors.length} · failed requests ${s.failedRequests.length}${s.blockedNavigation && s.blockedNavigation.length ? ' · blocked navigations ' + s.blockedNavigation.length : ''}</p>
+      <h2>Findings</h2>${findings ? `<ul class="plain">${findings}</ul>` : '<p class="empty">No findings.</p>'}</section>
+      <section class="card"><h2>Steps</h2><div class="thumbs">${steps || '<p class="empty">No steps yet.</p>'}</div></section></div></div>`;
+  },
+
+  async tests(id) {
+    const d = await api('/api/tests');
+    const fw = btn('job', d.installed ? 'Refresh framework' : 'Create framework', 'data-kind="scaffold"') + (d.exists ? btn('render', 'Re-render code') : '');
+    const head = (extra) => header('Framework', `Plain Playwright in <span class="mono">${esc(d.framework)}/</span> · runs in CI with npx playwright test, no AI needed${d.installed ? '' : ' · <b>not installed yet</b>'}`, fw + btn('generate', 'Write tests with AI', '', 'ai') + extra);
+    if (!d.groups.length) return head(btn('run-dialog', 'Run tests…', '', 'primary')) + `<p class="empty">No tests saved yet. ${d.installed ? '' : 'Create the framework first, then '}write tests with AI or from your AI coding tool.</p>`;
+    const g = d.groups.find((x) => x.requirementId === (id || '').toUpperCase()) || d.groups[0];
+    const spec = await api(`/api/spec?req=${enc(g.requirementId)}`);
+    const list = d.groups.map((x) => `<a class="item" href="#/tests/${enc(x.requirementId)}" aria-current="${x.requirementId === g.requirementId}"><b>${esc(x.requirementId)}</b> · ${x.tests.length} test(s)<div class="sub">${esc(x.title)}</div></a>`).join('');
+    const cards = g.tests.map((t) => `<li><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><span><b>${esc(t.acId ? t.acId + ' · ' : '')}${esc(t.title)}</b> ${t.latest ? chip(RESULT, t.latest.status) : t.last ? chip(RESULT, t.last.status) : ''}${t.latest && t.latest.verdict ? ` <span class="tag">${esc(t.latest.verdict)}</span>` : ''}${t.signedIn ? ' <span class="tag">signed in</span>' : ''}<div class="sub mono">${esc(t.id)}</div></span><span class="btns">${btn('run-test', 'Run', `data-test="${esc(t.id)}"`, 'sm')}${btn('remove-test', 'Remove', `data-test="${esc(t.id)}"`, 'sm danger')}</span></div><ol class="sub">${t.steps.map((s) => `<li>${esc(s)}</li>`).join('')}</ol></li>`).join('');
+    return head(btn('run-req', `Run ${g.requirementId}`, `data-req="${esc(g.requirementId)}"`, 'primary')) +
+      `<div class="split"><div class="list card" style="padding:8px">${list}</div><div class="detail stack">
+        <section class="card"><h2><a href="#/requirements/${enc(g.requirementId)}">${esc(g.requirementId)}</a> · ${esc(g.title)}</h2><ul class="plain">${cards}</ul></section>
+        <section class="card"><details><summary class="mono">${esc(spec.file)}</summary><div style="margin-top:10px">${spec.code ? `<pre class="code">${esc(spec.code)}</pre>` : '<p class="empty">Spec file not rendered yet. Click “Re-render code”.</p>'}</div></details></section>
+      </div></div>`;
+  },
+
+  async runs(id) {
+    const d = await api('/api/runs');
+    const run = id ? await api(`/api/runs/${enc(id)}`) : d.runs.length ? await api(`/api/runs/${enc(d.runs[0].id)}`) : null;
+    const list = d.runs.map((r) => `<a class="item" href="#/runs/${enc(r.id)}" aria-current="${!!run && r.id === run.id}"><b>${esc(r.id)}</b> · ${r.totals.passed}/${r.totals.total} passed${r.filter ? ' · filtered' : ''}<div class="bar" style="height:6px;margin:6px 0">${['passed', 'failed', 'flaky', 'skipped'].filter((k) => r.totals[k]).map((k) => `<div style="flex:${r.totals[k]} 1 0;background:${RESULT[k][1]}"></div>`).join('')}</div><div class="sub">${when(r.startedAt)} · ${(r.durationMs / 1000).toFixed(1)} s</div></a>`).join('');
+    const results = run ? run.results.slice().sort((a, b) => (a.status === 'passed') - (b.status === 'passed')).map((r) => `<tr><td>${esc(r.title)}<div class="sub mono">${esc(r.file)}:${r.line || ''} · ${esc(r.project)}</div>${r.error ? `<pre class="err">${esc(r.error.split('\n').slice(0, 6).join('\n'))}</pre>` : ''}${r.attachments.length ? `<div class="sub">${r.attachments.map((a) => `<a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.name)}</a>`).join(' · ')}</div>` : ''}</td><td>${chip(RESULT, r.status)}</td><td>${r.verdict ? `<span class="tag">${esc(r.verdict)}</span>` : ''}${r.testDefId && r.status !== 'passed' ? `<div style="margin-top:6px">${btn('run-test', 'Re-run', `data-test="${esc(r.testDefId)}"`, 'sm')}</div>` : ''}</td></tr>`).join('') : '';
+    await refreshJobs();
+    const applying = new Set(S.jobs.filter((j) => j.kind === 'review-heal' && (j.status === 'queued' || j.status === 'running')).map((j) => String((j.params || {}).healId || '').toUpperCase()));
+    const heals = d.heals.map((h) => `<li><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><span><b>${esc(h.id)}</b> ${chip(HEAL, h.status)} <span class="mono">${esc(h.testId)}</span> <span class="sub">${when(h.createdAt)}</span></span>
+      ${h.status === 'proposed' ? (applying.has(h.id) ? '<span class="chip"><span class="dot pulse" style="background:var(--ambiguous)"></span>Applying…</span>' : `<span class="btns">${btn('heal-apply', 'Apply', `data-heal="${esc(h.id)}"`, 'sm primary')}${btn('heal-reject', 'Reject', `data-heal="${esc(h.id)}"`, 'sm')}</span>`) : ''}</div>
+      ${h.fixes.map((f) => `<div class="diff"><span class="sub">step ${f.stepIndex + 1} · ${esc(f.action)}</span><span><span class="old">${esc(f.oldCode)}</span></span><span class="sub">→ (${f.confidence})</span><span class="new">${esc(f.newCode)}</span></div>`).join('')}
+      ${h.check ? `<div class="sub">Re-run: ${esc(h.check.status)}${h.check.verdict ? ' · ' + esc(h.check.verdict) : ''}${h.check.status === 'failed' && h.check.verdict === 'app-bug' ? ' (the locator is fixed; the assertion now fails, which looks like a real app bug)' : ''}</div>` : ''}${h.reason ? `<div class="sub">${esc(h.reason)}</div>` : ''}</li>`).join('');
+    return header('Runs & heals', 'Every run is sorted into app bugs, broken tests, flaky tests and environment problems', btn('heal-dialog', 'Heal…') + btn('run-dialog', 'Run tests…', '', 'primary')) +
+      `<div class="split"><div class="list card" style="padding:8px">${list || '<p class="empty">No runs yet.</p>'}</div><div class="detail stack">
+      ${run ? `<section class="card"><h2>${esc(run.id)} · ${run.totals.passed} passed · ${run.totals.failed} failed · ${run.totals.flaky} flaky · ${run.totals.skipped} skipped</h2><p class="sub">${when(run.startedAt)}${run.filter ? ' · filter ' + esc(run.filter) : ''}${run.bugs.length ? ' · bugs ' + run.bugs.map((b) => `<a href="#/bugs/${enc(b)}">${esc(b)}</a>`).join(', ') : ''}</p><div class="tbl"><table><thead><tr><th>Test</th><th>Result</th><th>Verdict</th></tr></thead><tbody>${results}</tbody></table></div></section>` : ''}
+      <section class="card"><h2>Heals</h2>${heals ? `<ul class="plain">${heals}</ul>` : '<p class="empty">No heals yet. Tests that break after a UI change are repaired here.</p>'}</section></div></div>`;
+  },
+
+  async bugs(id) {
+    if (id) return views.bug(id);
+    const d = await api('/api/bugs');
+    const shown = d.bugs.filter((b) => bugFilter === 'all' || (bugFilter === 'open' ? b.status !== 'discarded' : b.status === bugFilter));
+    const filters = ['open', 'draft', 'approved', 'filed', 'discarded', 'all'].map((f) => `<button data-action="bug-filter" data-f="${f}" aria-pressed="${bugFilter === f}">${f[0].toUpperCase() + f.slice(1)}</button>`).join('');
+    return header('Bugs', 'Drafted from explorations and test runs; nothing is filed until someone decides to') +
+      `<div class="filters">${filters}</div><section class="card" style="padding:6px 0 0"><div class="tbl"><table><thead><tr><th style="padding-left:20px">Bug</th><th>Title</th><th>Requirement</th><th>Severity</th><th>Status</th></tr></thead><tbody>
+      ${shown.map((b) => `<tr class="click" data-href="#/bugs/${enc(b.id)}"><td class="mono" style="padding-left:20px"><a href="#/bugs/${enc(b.id)}">${esc(b.id)}</a></td><td>${esc(b.title)}</td><td class="mono">${esc((b.requirementId || '') + (b.acId ? ' ' + b.acId : ''))}</td><td>${esc(b.severity)}</td><td>${chip(BUG, b.status)}${b.ticket ? ` <a href="${esc(b.ticket.url)}" target="_blank" rel="noopener">${esc(b.ticket.key)}</a>` : ''}</td></tr>`).join('') || '<tr><td colspan="5" class="empty" style="padding-left:20px">No bugs here.</td></tr>'}
+      </tbody></table></div></section>`;
+  },
+
+  async bug(id) {
+    const d = await api(`/api/bugs/${enc(id)}`);
+    const b = d.bug;
+    const open = b.status === 'draft' || b.status === 'approved';
+    const actions = b.status === 'filed' ? '' : b.status === 'discarded'
+      ? btn('bug-status', 'Reopen as draft', `data-id="${esc(b.id)}" data-status="draft"`)
+      : `${btn('bug-edit', 'Edit')}${b.status === 'draft' ? btn('bug-status', 'Approve', `data-id="${esc(b.id)}" data-status="approved"`) : ''}${btn('bug-status', 'Discard', `data-id="${esc(b.id)}" data-status="discarded"`, 'danger')}
+         <button class="primary" data-action="bug-file" data-id="${esc(b.id)}" ${d.jiraConfigured ? '' : 'disabled title="Set up Jira in Settings first"'}>File in Jira</button>`;
+    const evidence = b.evidence.map((e) => e.url && /\.(png|jpe?g)$/i.test(e.file) ? `<figure><a href="${esc(e.url)}" target="_blank" rel="noopener"><img loading="lazy" src="${esc(e.url)}" alt="${esc(e.name)}"></a><figcaption>${esc(e.name)}</figcaption></figure>` : `<figure><figcaption>${e.url ? `<a href="${esc(e.url)}" target="_blank" rel="noopener">${esc(e.name)}: ${esc(e.file)}</a>` : esc(e.name) + ' (file no longer exists)'}</figcaption></figure>`).join('');
+    const editForm = open ? `<section class="card" id="bugEdit" hidden><h2>Edit ${esc(b.id)}</h2><form data-form="bug" data-id="${esc(b.id)}" class="stack">
+        <label class="field">Title <input name="title" required value="${esc(b.title)}"></label>
+        <label class="field" style="max-width:220px">Severity <select name="severity">${['high', 'medium', 'low'].map((s) => `<option ${s === b.severity ? 'selected' : ''}>${s}</option>`).join('')}</select></label>
+        <label class="field">Steps to reproduce <textarea name="steps" rows="6">${esc(b.steps.join('\n'))}</textarea><span class="hint">One step per line.</span></label>
+        <div class="fields"><label class="field">Expected <textarea name="expected" rows="4">${esc(b.expected)}</textarea></label><label class="field">Actual <textarea name="actual" rows="4">${esc(b.actual)}</textarea></label></div>
+        <label class="field">Note <textarea name="note" rows="2">${esc(b.note || '')}</textarea></label>
+        <div class="btns"><button class="primary" type="submit">Save</button>${btn('bug-edit', 'Cancel')}</div></form></section>` : '';
+    return header(`${b.id} · ${b.title}`, `<a href="#/bugs">Bugs</a> · ${chip(BUG, b.status)} · severity ${esc(b.severity)}${b.ticket ? ` · <a href="${esc(b.ticket.url)}" target="_blank" rel="noopener">${esc(b.ticket.key)}</a>` : ''}`, actions) + editForm +
+      `<div class="row"><section class="card grow2"><h2>Steps to reproduce</h2><ol>${b.steps.map((s) => `<li>${esc(s)}</li>`).join('')}</ol>
+      <div class="ea"><div><b>Expected</b><br>${esc(b.expected)}</div><div style="background:var(--danger-soft)"><b>Actual</b><br>${esc(b.actual)}</div></div>${b.note ? `<p><b>Note:</b> ${esc(b.note)}</p>` : ''}</section>
+      <section class="card grow1"><h2>Details</h2><ul class="plain"><li>Requirement: ${b.requirementId ? `<a href="#/requirements/${enc(b.requirementId)}">${esc(b.requirementId)}</a> ${esc(b.acId || '')}` : '—'}</li><li>Environment: ${esc(b.environment)}</li><li>Found by: ${esc(b.source.kind)} ${esc(b.source.ref)}</li>${b.alsoSeenIn && b.alsoSeenIn.length ? `<li>Also seen in: ${esc(b.alsoSeenIn.join(', '))}</li>` : ''}<li>Updated: ${when(b.updatedAt)}</li></ul>${d.jiraConfigured || b.status === 'filed' ? '' : '<p class="sub">To file bugs in Jira, add your Jira site in <a href="#/settings">Settings</a>.</p>'}</section></div>
+      <section class="card"><h2>Evidence</h2><div class="thumbs">${evidence || '<p class="empty">None.</p>'}</div></section>`;
+  },
+
+  async agent() {
+    await refreshState();
+    const ai = S.state.ai;
+    const reqs = await reqList(true);
+    const recent = ai.recent.map((r) => `<li><a href="#/jobs/${enc(r.id)}">${esc(r.label)}</a> ${chip(JOB, r.status)}<div class="sub">${esc(fmtUsage(r.usage))}</div></li>`).join('');
+    const who = ai.provider === 'openrouter' ? 'OpenRouter' : 'Anthropic';
+    return header('AI agent', `TraceQA’s own agent, for work without an AI coding tool. Every run is billed to your ${who} account.`) +
+      `<div class="row"><div class="grow2 stack">
+        <section class="card"><h2>Ask the agent</h2><form data-form="agent" class="stack">
+          <label class="field">Task in plain words <textarea name="task" rows="4" required placeholder="e.g. Test REQ-131 and REQ-150, then tell me which criteria fail"></textarea></label>
+          <div><button class="primary ai" type="submit">Start…</button></div></form></section>
+        <section class="card"><h2>Common tasks</h2><ul class="plain">
+          <li><b>Explore a requirement</b><div class="sub">Tries every criterion in a real browser; problems become draft bugs with screenshots.</div><div style="margin-top:8px">${btn('explore', 'Explore…', '', 'sm ai')}</div></li>
+          <li><b>Write tests</b><div class="sub">One test per acceptance criterion, checked and run.</div><div style="margin-top:8px">${btn('generate', 'Write tests…', '', 'sm ai')}</div></li>
+          <li><b>Fix tests healing could not fix</b><div class="sub">Heal first; the agent takes what is left.</div><div style="margin-top:8px">${btn('heal-dialog', 'Heal…', '', 'sm')}</div></li>
+        </ul></section>
+      </div><div class="grow1 stack">
+        <section class="card"><h2>Setup</h2><ul class="plain">
+          <li>Provider: <b>${who}</b></li>
+          <li>API key <span class="mono">${esc(ai.keyName)}</span>: ${ai.configured ? `<b>set</b> <span class="sub">(${esc(ai.source)})</span>` : '<b style="color:var(--danger)">not set</b>'}</li>
+          <li>Model: <span class="mono">${esc(ai.model)}</span> · effort ${esc(ai.effort)} · up to ${ai.maxTurns} turns</li>
+          <li>Requirements available: ${reqs.length}</li></ul>
+          <a class="btn sm" href="#/settings">Change in Settings</a></section>
+        <section class="card"><h2>Recent AI jobs</h2>${recent ? `<ul class="plain">${recent}</ul>` : '<p class="empty">None yet.</p>'}<p class="sub">${ai.provider === 'openrouter' ? 'Costs are what OpenRouter reported for each request.' : 'Costs are estimates from list prices; your Anthropic Console has the exact bill.'}</p></section>
+      </div></div>`;
+  },
+
+  async jobs(id) {
+    const d = await api('/api/jobs');
+    S.jobs = d.jobs;
+    const head = header('Jobs', 'Everything started from this dashboard, one at a time, with its full output');
+    if (!d.jobs.length) return head + '<p class="empty">No jobs yet. Buttons like “Run tests” and “Analyze app” start jobs.</p>';
+    const sel = d.jobs.find((j) => j.id === (id || '').toUpperCase()) || d.jobs[0];
+    const j = (await api(`/api/jobs/${enc(sel.id)}`)).job;
+    const list = d.jobs.map((x) => `<a class="item" href="#/jobs/${enc(x.id)}" aria-current="${x.id === j.id}"><b>${esc(x.id)}</b> ${chip(JOB, x.status)}${x.ai ? ' <span class="tag ai">AI</span>' : ''}<div>${esc(x.label)}</div><div class="sub">${when(x.createdAt)}</div></a>`).join('');
+    let live = '';
+    if (j.sessionId) {
+      const sessions = (await api('/api/sessions')).sessions;
+      const s = sessions.find((x) => x.id === j.sessionId);
+      if (s) {
+        const last = s.steps.filter((st) => st.screenshot).slice(-1)[0];
+        live = `<section class="card"><h2>${s.live ? '<span class="dot pulse" style="background:var(--failing)"></span> Live: ' : ''}exploration ${esc(s.id)} <a href="#/sessions/${enc(s.id)}" style="font-size:13px;font-weight:500">Open session →</a></h2>
+          ${last ? `<figure style="margin:0"><img class="shot shotlive" src="${esc(last.screenshot)}" alt="Latest browser screenshot, step ${last.n}"><figcaption class="sub">Step ${last.n}: ${esc(last.detail)}${last.error ? ' · ' + esc(last.error) : ''}</figcaption></figure>` : '<p class="empty">Waiting for the first step…</p>'}
+          <p class="sub">${s.steps.length} steps · ${s.findings.length} findings${s.findings.length ? ': ' + s.findings.map((f) => `<a href="#/bugs/${enc(f.bugId)}">${esc(f.bugId)}</a>`).join(', ') : ''}</p></section>`;
+      }
+    }
+    const active = j.status === 'running' || j.status === 'queued';
+    return head + `<div class="split"><div class="list card" style="padding:8px">${list}</div><div class="detail stack">
+      <section class="card"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap"><h2>${esc(j.id)} · ${esc(j.label)} ${chip(JOB, j.status)}</h2>${active ? btn('job-stop', j.status === 'queued' ? 'Cancel' : 'Stop', `data-id="${esc(j.id)}"`, 'danger') : ''}</div>
+        <p class="sub">Started ${when(j.startedAt || j.createdAt)}${j.startedAt ? ' · ' + dur(j.startedAt, j.finishedAt) : ''}${j.usage ? ' · ' + esc(fmtUsage(j.usage)) : ''}${j.ai ? ' · <span class="tag ai">AI</span>' : ''}</p>
+        ${j.error ? `<div class="error">${esc(j.error)}</div>` : ''}
+        ${j.result ? `<h3>Result</h3><pre class="result">${esc(j.result)}</pre>` : ''}</section>
+      ${live}
+      <section class="card"><h2>Output</h2><pre class="log" id="joblog" data-job="${esc(j.id)}" tabindex="0" aria-label="Job output">${esc(j.log.join('\n'))}</pre></section>
+      </div></div>`;
+  },
+
+  async settings() {
+    const d = await api('/api/settings');
+    const c = d.config;
+    const env = Object.fromEntries(d.env.map((e) => [e.group + ':' + e.label, e]));
+    const envField = (e, extra = '') => e.secret
+      ? `<div class="field secret"><label class="field" style="flex:none">${esc(e.label)} <input type="password" name="env:${esc(e.key)}" autocomplete="new-password" placeholder="${e.set ? 'Saved · type to replace' : 'Not set'}"></label>
+         <span class="hint sub">${e.set && e.source === 'environment' ? `Set in the environment as <span class="mono">${esc(e.key)}</span>; that value wins over .env.` : `${e.set ? 'Saved' : 'Saved when you type it'} in .env as <span class="mono">${esc(e.key)}</span>; never shown again.`}</span>
+         ${e.set && e.source === '.env' ? `<label class="check sub"><input type="checkbox" name="clear:${esc(e.key)}" value="1"> Remove the saved value</label>` : ''}${extra}</div>`
+      : `<label class="field">${esc(e.label)} <input name="env:${esc(e.key)}" value="${esc(e.value)}" autocomplete="off"><span class="hint">Stored in .env as <span class="mono">${esc(e.key)}</span>.</span></label>`;
+    const byGroup = (g) => d.env.filter((e) => e.group === g && e.key !== 'ANTHROPIC_API_KEY' && e.key !== 'OPENROUTER_API_KEY');
+    const byKey = (k) => { const e = d.env.find((x) => x.key === k); return e ? envField(e) : ''; };
+    const a = c.auth || {}, j = c.jira || {};
+    const effortOpts = ['low', 'medium', 'high', 'xhigh', 'max'].map((x) => `<option ${x === c.ai.effort ? 'selected' : ''}>${x}</option>`).join('');
+    return header('Settings', `Saved to <span class="mono">traceqa.config.json</span> and <span class="mono">.env</span> in ${esc(d.dir)}`) +
+      `${d.notes.map((n) => `<div class="warnbox">${esc(n)}</div>`).join('')}
+      <form data-form="settings" class="stack">
+      <section class="card"><h2>App</h2><div class="fields">
+        <label class="field">App address <input type="url" name="baseUrl" required value="${esc(c.baseUrl)}"><span class="hint">A test or staging site, never production.</span></label></div>
+        <fieldset style="margin-top:12px"><legend>Browsers</legend><div class="btns">${['chromium', 'firefox', 'webkit'].map((b) => `<label class="check"><input type="checkbox" name="browsers" value="${b}" ${c.browsers.includes(b) ? 'checked' : ''}> ${b === 'webkit' ? 'WebKit (Safari)' : b === 'chromium' ? 'Chromium (Chrome, Edge)' : 'Firefox'}</label>`).join('')}</div></fieldset></section>
+
+      <section class="card"><h2>Sign-in</h2>
+        <label class="check"><input type="checkbox" name="hasAuth" value="1" data-toggle="#authFields" ${c.auth ? 'checked' : ''}> The app needs a sign-in for some pages</label>
+        <div id="authFields" ${c.auth ? '' : 'hidden'} class="stack" style="margin-top:12px"><div class="fields">
+          <label class="field">Sign-in page path <input name="auth.loginPath" value="${esc(a.loginPath || '/login')}"></label>
+          <label class="field">User name field label <input name="auth.usernameLabel" value="${esc(a.usernameLabel || 'Email')}"></label>
+          <label class="field">Password field label <input name="auth.passwordLabel" value="${esc(a.passwordLabel || 'Password')}"></label>
+          <label class="field">Sign-in button text <input name="auth.submitButton" value="${esc(a.submitButton || 'Sign in')}"></label></div>
+          <div class="fields">${byGroup('auth').map((e) => envField(e)).join('')}</div></div></section>
+
+      <section class="card"><h2>Safety</h2><p class="sub">The browser stays on these hosts, never clicks these words, and explorations stop at these limits.</p><div class="fields">
+        <label class="field">Allowed hosts <textarea name="safety.allowedHosts" rows="3">${esc(c.safety.allowedHosts.join('\n'))}</textarea><span class="hint">One per line, e.g. staging.example.com</span></label>
+        <label class="field">Never click (blocked actions) <textarea name="safety.blockedActions" rows="3">${esc(c.safety.blockedActions.join('\n'))}</textarea><span class="hint">One per line, e.g. Delete account</span></label></div>
+        <div class="fields" style="margin-top:12px"><label class="field">Max pages per exploration <input type="number" min="1" name="safety.maxPagesPerSession" value="${c.safety.maxPagesPerSession}"></label>
+        <label class="field">Max minutes per exploration <input type="number" min="1" step="any" name="safety.maxMinutesPerSession" value="${c.safety.maxMinutesPerSession}"></label>
+        <label class="field">Max pages when analyzing <input type="number" min="1" name="analyze.maxPages" value="${c.analyze.maxPages}"></label></div>
+        <label class="field" style="margin-top:12px">Links the analyzer skips <textarea name="analyze.skipLinks" rows="3">${esc(c.analyze.skipLinks.join('\n'))}</textarea><span class="hint">One per line, e.g. log out</span></label></section>
+
+      <section class="card"><h2>AI agent</h2><p class="sub">Used by the AI buttons and the AI commands. AI coding tools use their own model instead.</p><div class="fields">
+        <label class="field">Provider <select name="ai.provider" data-provider-switch>
+          <option value="anthropic" ${c.ai.provider !== 'openrouter' ? 'selected' : ''}>Anthropic (Claude API)</option>
+          <option value="openrouter" ${c.ai.provider === 'openrouter' ? 'selected' : ''}>OpenRouter (Claude and other models)</option></select>
+          <span class="hint">Who runs the model and bills you.</span></label>
+        <label class="field">Effort <select name="ai.effort">${effortOpts}</select><span class="hint">Higher effort is more thorough and costs more.</span></label>
+        <label class="field">Max turns per job <input type="number" min="1" name="ai.maxTurns" value="${c.ai.maxTurns}"></label></div>
+        <div data-provider="anthropic" class="stack" style="margin-top:12px" ${c.ai.provider === 'openrouter' ? 'hidden' : ''}><div class="fields">
+          <label class="field">Claude model <input name="ai.model" list="models" value="${esc(c.ai.model)}"><datalist id="models"><option value="claude-opus-5-5"><option value="claude-sonnet-5-5"><option value="claude-fable-5-1"></datalist></label>
+          ${byKey('ANTHROPIC_API_KEY')}</div></div>
+        <div data-provider="openrouter" class="stack" style="margin-top:12px" ${c.ai.provider === 'openrouter' ? '' : 'hidden'}>
+          <div class="fields">
+            <label class="field">OpenRouter model <input name="ai.openrouter.model" list="orModels" value="${esc(c.ai.openrouter.model)}" autocomplete="off"><datalist id="orModels"></datalist>
+              <span class="hint" id="orModelHint">Any model that supports tool calling, e.g. anthropic/claude-opus-5.5.</span></label>
+            ${byKey('OPENROUTER_API_KEY')}</div>
+          <div class="fields">
+            <label class="field">Data collection <select name="ai.openrouter.dataCollection">
+              <option value="deny" ${c.ai.openrouter.dataCollection === 'deny' ? 'selected' : ''}>Deny: only providers that don't store or train on data</option>
+              <option value="allow" ${c.ai.openrouter.dataCollection === 'allow' ? 'selected' : ''}>Allow any provider</option></select>
+              <span class="hint">The agent sends your app's page text and test data to the provider OpenRouter picks.</span></label>
+            <label class="check" style="flex:1 1 240px"><input type="checkbox" name="ai.openrouter.zdr" value="1" ${c.ai.openrouter.zdr ? 'checked' : ''}> Zero Data Retention endpoints only</label></div>
+          <details><summary class="sub">Advanced</summary><label class="field" style="margin-top:8px">API address <input type="url" name="ai.openrouter.baseUrl" value="${esc(c.ai.openrouter.baseUrl)}"></label></details>
+        </div></section>
+
+      <section class="card"><h2>Jira</h2>
+        <label class="check"><input type="checkbox" name="hasJira" value="1" data-toggle="#jiraFields" ${c.jira ? 'checked' : ''}> File bugs in Jira</label>
+        <div id="jiraFields" ${c.jira ? '' : 'hidden'} class="stack" style="margin-top:12px"><div class="fields">
+          <label class="field">Jira site <input type="url" name="jira.baseUrl" value="${esc(j.baseUrl || '')}" placeholder="https://yourcompany.atlassian.net"></label>
+          <label class="field">Project key <input name="jira.projectKey" value="${esc(j.projectKey || '')}" placeholder="SHOP"></label>
+          <label class="field">Issue type <input name="jira.issueType" value="${esc(j.issueType || 'Bug')}"></label>
+          <label class="field">Sign-in type <select name="jira.auth"><option value="basic" ${j.auth !== 'bearer' ? 'selected' : ''}>Email + API token (Jira Cloud)</option><option value="bearer" ${j.auth === 'bearer' ? 'selected' : ''}>Personal access token (Data Center)</option></select></label>
+          <label class="field">Labels <input name="jira.labels" value="${esc((j.labels || ['traceqa']).join(', '))}"><span class="hint">Comma separated</span></label></div>
+          <div class="fields">${byGroup('jira').map((e) => envField(e)).join('')}</div></div></section>
+
+      <div class="savebar"><button class="primary" type="submit">Save settings</button><span class="sub" id="saveNote"></span></div>
+      </form>
+
+      <section class="card"><h2>Connect AI coding tools</h2><p>Writes the TraceQA server into <span class="mono">.mcp.json</span> (Claude Code), <span class="mono">.cursor/mcp.json</span>, <span class="mono">.codex/config.toml</span>, plus <span class="mono">AGENTS.md</span>, a Claude skill and a Cursor rule. Existing entries for other servers are kept.</p>
+        ${btn('connect', 'Connect AI coding tools')}<div id="connectOut"></div></section>`;
+  },
+};
+
+// ---------- after-render hooks ----------
+
+const mounts = {
+  reqFiles() {
+    const ed = $('#reqEditor');
+    if (!ed) return;
+    const form = ed.closest('form');
+    let t;
+    const preview = async () => {
+      try {
+        const r = await post('/api/requirements/preview', { content: ed.value, file: form.elements.file.value });
+        $('#reqPreview').innerHTML = r.requirements.length
+          ? `<ul class="plain">${r.requirements.map((q) => `<li><b class="mono">${esc(q.id)}</b> ${esc(q.title)} <span class="sub">· ${esc(q.feature)} · ${q.criteria.length} criteria</span>${[...q.issues, ...q.criteria.flatMap((c) => c.issues)].map((i) => `<div class="issue">${esc(i.acId ? i.acId + ': ' : '')}${esc(i.message)}</div>`).join('')}</li>`).join('')}</ul>`
+          : '<div class="warnbox">No requirements found. Each one needs a heading like “## REQ-142 Title”.</div>';
+      } catch (err) { $('#reqPreview').textContent = err.message; }
+    };
+    ed.addEventListener('input', () => { clearTimeout(t); t = setTimeout(preview, 350); });
+    preview();
+    const up = $('#uploadMd');
+    up.addEventListener('change', async () => {
+      const f = up.files[0];
+      if (!f) return;
+      if (f.size > 512 * 1024) return toast('That file is over 512 KB.', 5000);
+      ed.value = await f.text();
+      form.elements.file.value = f.name.replace(/[^A-Za-z0-9 _.\-]/g, '-');
+      form.dataset.previous = '';
+      form.dataset.dirty = '1';
+      preview();
+      toast(`Loaded ${esc(f.name)}. Check it, then click “Save and import”.`, 5000);
+    });
+  },
+  jobs() {
+    const log = $('#joblog');
+    if (log) log.scrollTop = log.scrollHeight;
+  },
+  async settings() {
+    // Fill the OpenRouter model picker from OpenRouter's public list (tool-capable models only).
+    const list = $('#orModels');
+    if (!list) return;
+    try {
+      const { models } = await api('/api/openrouter-models');
+      const price = (m) => `$${m.input.toFixed(2)} / $${m.output.toFixed(2)} per M tokens`;
+      list.innerHTML = models.map((m) => `<option value="${esc(m.id)}">${esc(m.name)} · ${esc(price(m))}</option>`).join('');
+      const input = $('[name="ai.openrouter.model"]');
+      const hint = $('#orModelHint');
+      const show = () => {
+        const m = models.find((x) => x.id === input.value.trim());
+        hint.textContent = m ? `${m.name} · ${price(m)} · ${Math.round(m.context / 1000)}k context · supports tool calling` : input.value.trim() ? 'Not in OpenRouter’s list of tool-calling models; check the id.' : `${models.length} tool-calling models available.`;
+      };
+      input.addEventListener('input', show);
+      show();
+    } catch {
+      $('#orModelHint').textContent = 'Could not load the model list from OpenRouter; type a model id such as anthropic/claude-opus-5.5.';
+    }
+  },
+};
+
+// ---------- routing, rendering, live updates ----------
+
+function route() {
+  const parts = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean).map((p) => { try { return decodeURIComponent(p); } catch { return p; } });
+  const view = parts[0] && views[parts[0]] && !['setup', 'reqFiles', 'requirement', 'bug'].includes(parts[0]) ? parts[0] : 'overview';
+  return [view, ...parts.slice(1)];
+}
+
+let rendering = false, pending = false, lastKey = '';
+async function render() {
+  if (rendering) { pending = true; return; }
+  rendering = true;
+  let [view, ...args] = route();
+  if (S.state && !S.state.ready) { view = 'setup'; args = []; }
+  const key = location.hash;
+  const sameRoute = key === lastKey;
+  const y = window.scrollY;
+  const log = $('#joblog');
+  const logAtBottom = log ? log.scrollTop + log.clientHeight >= log.scrollHeight - 30 : true;
+  document.querySelectorAll('#navlinks a').forEach((a) => a.setAttribute('aria-current', a.dataset.view === (view === 'report' ? 'overview' : view) ? 'page' : 'false'));
+  try {
+    const html = await views[view](...args);
+    $('#main').innerHTML = html;
+    const mountKey = view === 'requirements' && args[0] === 'files' ? 'reqFiles' : view;
+    mounts[mountKey]?.(...args);
+    if (sameRoute) {
+      window.scrollTo(0, y);
+      const nl = $('#joblog');
+      if (nl && !logAtBottom && log) nl.scrollTop = log.scrollTop;
+    }
+  } catch (err) {
+    if (err.status === 409 && /not set up/i.test(err.message)) { await refreshState(); rendering = false; return render(); }
+    $('#main').innerHTML = `<div class="error">${esc(err.message)}</div>`;
+  }
+  lastKey = key;
+  rendering = false;
+  if (pending) { pending = false; render(); }
+}
+
+function isEditing() {
+  const main = $('#main');
+  if (main.querySelector('form[data-dirty]')) return true;
+  const a = document.activeElement;
+  return !!(a && main.contains(a) && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) || $('#dlg').open;
+}
+function liveRefresh() {
+  if (isEditing()) { const bar = $('#updbar'); if (bar) bar.style.display = 'flex'; return; }
+  render();
+}
+
+function toast(html, ms) {
+  const t = $('#toast');
+  t.innerHTML = html;
+  t.style.display = 'block';
+  clearTimeout(toast.timer);
+  if (ms) toast.timer = setTimeout(() => (t.style.display = 'none'), ms);
+}
+const toastError = (err) => toast(`<span style="color:var(--danger);white-space:pre-wrap">${esc(err.message)}</span> <button class="sm" onclick="this.parentNode.style.display='none'">Close</button>`, 10000);
+
+async function refreshState() {
+  try { S.state = await api('/api/state'); } catch { return; }
+  const st = S.state;
+  $('#projName').textContent = st.ready ? st.project : 'Not set up';
+  $('#projUrl').textContent = st.ready ? st.baseUrl : st.dir;
+  document.title = st.ready ? `TraceQA · ${st.project}` : 'TraceQA · Set up';
+  $('#navlinks').hidden = !st.ready;
+}
+
+async function refreshJobs() {
+  if (!S.state || !S.state.ready) return;
+  try { S.jobs = (await api('/api/jobs')).jobs; } catch { return; }
+  const running = S.jobs.find((j) => j.status === 'running');
+  const queued = S.jobs.filter((j) => j.status === 'queued').length;
+  const el = $('#running');
+  if (running) {
+    el.style.display = 'block';
+    el.href = `#/jobs/${enc(running.id)}`;
+    el.innerHTML = `<span class="dot pulse" style="background:#3DD37A"></span> <b>${esc(running.label)}</b><div class="sub">${esc(running.id)} running${queued ? ` · ${queued} queued` : ''}${running.usage ? ' · ' + esc(fmtUsage(running.usage)) : ''}</div>`;
+  } else el.style.display = 'none';
+}
+
+// ---------- actions ----------
+
+document.addEventListener('click', async (e) => {
+  const row = e.target.closest('tr[data-href]');
+  if (row && !e.target.closest('a,button')) { location.hash = row.dataset.href; return; }
+  const el = e.target.closest('[data-action]');
+  if (!el || el.tagName === 'FORM') return;
+  const a = el.dataset.action;
+  try {
+    if (a === 'req-filter') { reqFilter = el.dataset.f; return render(); }
+    if (a === 'bug-filter') { bugFilter = el.dataset.f; return render(); }
+    if (a === 'refresh') { document.querySelectorAll('#main form[data-dirty]').forEach((f) => delete f.dataset.dirty); return render(); }
+    if (a === 'bug-edit') { const s = $('#bugEdit'); s.hidden = !s.hidden; if (!s.hidden) s.querySelector('input').focus(); else delete s.querySelector('form').dataset.dirty; return; }
+    if (a === 'upload') return $('#uploadMd').click();
+    if (a === 'run-dialog') return await runDialog();
+    if (a === 'run-req') return await runDialog({ requirementId: el.dataset.req });
+    if (a === 'run-test') return await startJob({ kind: 'run', testId: el.dataset.test });
+    if (a === 'heal-dialog') return await healDialog();
+    if (a === 'explore') return await exploreDialog(el.dataset.req);
+    if (a === 'generate') return await generateDialog(el.dataset.req ? [el.dataset.req] : []);
+    el.disabled = true;
+    if (a === 'job') {
+      await startJob({ kind: el.dataset.kind });
+    } else if (a === 'import') {
+      const r = await post('/api/requirements/import');
+      S.reqs = null;
+      toast(`Imported ${r.imported} requirements from ${r.files} file(s)${r.mapped ? ' and re-mapped them to pages' : ''}.${r.duplicates.length ? ' Duplicate IDs ignored: ' + esc(r.duplicates.join(', ')) : ''}`, 5000);
+    } else if (a === 'map') {
+      const r = await post('/api/map');
+      toast(`${r.mapped} requirement(s) mapped to pages.${r.unmapped.length ? ' No page for: ' + esc(r.unmapped.join(', ')) + '.' : ''}`, 6000);
+    } else if (a === 'render') {
+      const r = await post('/api/render');
+      toast(`Rendered ${r.pageObjects} page objects and ${r.specs} spec files.`, 4000);
+    } else if (a === 'remove-test') {
+      if (!(await confirmBox('Remove this test?', `<p><span class="mono">${esc(el.dataset.test)}</span> is deleted and its spec file is rewritten. Your version control still has the old code.</p>`, 'Remove test', true))) { el.disabled = false; return; }
+      await post(`/api/tests/${enc(el.dataset.test)}/remove`);
+      toast('Test removed.', 3000);
+    } else if (a === 'heal-apply') {
+      await startJob({ kind: 'review-heal', healId: el.dataset.heal });
+    } else if (a === 'heal-reject') {
+      await post(`/api/heals/${enc(el.dataset.heal)}/reject`);
+      toast(`${esc(el.dataset.heal)} rejected. The test was not changed.`, 4000);
+    } else if (a === 'bug-status') {
+      const s = el.dataset.status;
+      if (s === 'discarded' && !(await confirmBox('Discard this bug?', '<p>It is hidden from the open list. You can reopen it later.</p>', 'Discard', true))) { el.disabled = false; return; }
+      const r = await post(`/api/bugs/${enc(el.dataset.id)}/status`, { status: s });
+      toast(`${esc(r.bug.id)} is now ${esc(r.bug.status)}.${r.exported ? ' Ticket text saved to ' + esc(r.exported) : ''}`, 5000);
+    } else if (a === 'bug-file') {
+      if (!(await confirmBox('File this bug in Jira?', '<p>This creates an issue in your Jira project with the steps and evidence attached. If an open issue already exists for the same requirement criterion, TraceQA comments on it instead.</p>', 'File in Jira'))) { el.disabled = false; return; }
+      const r = await post(`/api/bugs/${enc(el.dataset.id)}/file`);
+      toast(`${esc(r.bug.id)} ${r.created ? 'filed as' : 'added to'} <a href="${esc(r.bug.ticket.url)}" target="_blank" rel="noopener">${esc(r.bug.ticket.key)}</a> · ${r.attached} attachment(s).`, 8000);
+    } else if (a === 'reqfile-delete') {
+      if (!(await confirmBox('Move this file to the trash?', `<p><span class="mono">${esc(el.dataset.file)}</span> moves to <span class="mono">.traceqa/trash/</span>, so you can get it back. Its requirements are removed from TraceQA.</p>`, 'Move to trash', true))) { el.disabled = false; return; }
+      const r = await post('/api/requirement-files/delete', { file: el.dataset.file });
+      S.reqs = null;
+      toast(`Moved to ${esc(r.trashed)}. ${r.imported} requirements remain.`, 6000);
+      location.hash = '#/requirements/files';
+    } else if (a === 'job-stop') {
+      await post(`/api/jobs/${enc(el.dataset.id)}/stop`);
+      toast('Stopping…', 3000);
+    } else if (a === 'connect') {
+      const r = await post('/api/connect-ai-tools');
+      $('#connectOut').innerHTML = `<div class="okbox">Connected. ${r.created.length ? 'Created: ' + esc(r.created.join(', ')) + '. ' : ''}${r.updated.length ? 'Updated: ' + esc(r.updated.join(', ')) + '.' : ''}</div><p class="sub">Antigravity: open MCP Servers → Manage MCP Servers → View raw config and add:</p><pre class="code">${esc(r.antigravity)}</pre>`;
+      el.disabled = false;
+      return;
+    }
+    if (!$('#dlg').open) render();
+  } catch (err) {
+    toastError(err);
+    el.disabled = false;
+  }
+});
+
+document.addEventListener('input', (e) => {
+  const f = e.target.closest('#main form');
+  if (f) f.dataset.dirty = '1';
+});
+document.addEventListener('change', (e) => {
+  const t = e.target.closest('[data-toggle]');
+  if (t) { const target = $(t.dataset.toggle); if (target) target.hidden = !t.checked; }
+  const p = e.target.closest('[data-provider-switch]');
+  if (p) document.querySelectorAll('[data-provider]').forEach((el) => (el.hidden = el.dataset.provider !== p.value));
+});
+
+function toList(v, sep = /\n/) { return String(v || '').split(sep).map((x) => x.trim()).filter(Boolean); }
+
+document.addEventListener('submit', async (e) => {
+  const f = e.target.closest('form[data-form]');
+  if (!f) return;
+  e.preventDefault();
+  const fd = new FormData(f);
+  const submit = f.querySelector('[type=submit]');
+  if (submit) submit.disabled = true;
+  try {
+    switch (f.dataset.form) {
+      case 'setup': {
+        const auth = fd.get('hasAuth') ? { loginPath: fd.get('loginPath') || '/login', usernameLabel: fd.get('usernameLabel') || 'Email', passwordLabel: fd.get('passwordLabel') || 'Password', submitButton: fd.get('submitButton') || 'Sign in' } : undefined;
+        const env = fd.get('hasAuth') ? { TEST_USER_EMAIL: fd.get('testUser') || '', TEST_USER_PASSWORD: fd.get('testPassword') || '' } : undefined;
+        const r = await post('/api/setup', { baseUrl: fd.get('baseUrl'), auth, env, agents: fd.get('agents') === '1' });
+        await refreshState();
+        location.hash = '#/requirements/files/new';
+        toast(`Project set up (${esc(r.created.join(', '))}).${r.notes.length ? ' ' + esc(r.notes.join(' ')) : ''} Next: add your requirements.`, 9000);
+        break;
+      }
+      case 'clarify': {
+        const r = await post(`/api/requirements/${enc(f.dataset.req)}/clarify`, { acId: f.dataset.ac, text: fd.get('text') });
+        toast(`${esc(f.dataset.req)} ${esc(r.criterion.id)} saved.${r.criterion.issues.length ? ' Still unclear: ' + esc(r.criterion.issues.map((i) => i.message).join(' ')) : ''}`, 6000);
+        break;
+      }
+      case 'reqfile': {
+        const r = await post('/api/requirement-files', { file: fd.get('file'), content: fd.get('content'), previousFile: f.dataset.previous || undefined });
+        S.reqs = null;
+        delete f.dataset.dirty;
+        toast(`Saved ${esc(r.file)}. ${r.imported} requirements imported${r.mapped ? ' and mapped to pages' : ''}.${r.duplicates.length ? ' Duplicate IDs ignored: ' + esc(r.duplicates.join(', ')) : ''}`, 6000);
+        if (location.hash !== `#/requirements/files/${enc(r.file)}`) { location.hash = `#/requirements/files/${enc(r.file)}`; return; }
+        break;
+      }
+      case 'bug': {
+        await post(`/api/bugs/${enc(f.dataset.id)}`, { title: fd.get('title'), severity: fd.get('severity'), steps: toList(fd.get('steps')), expected: fd.get('expected'), actual: fd.get('actual'), note: fd.get('note') });
+        delete f.dataset.dirty;
+        toast(`${esc(f.dataset.id)} saved.`, 3000);
+        break;
+      }
+      case 'agent': {
+        const job = await agentTask(String(fd.get('task')).trim());
+        if (job) { delete f.dataset.dirty; location.hash = `#/jobs/${enc(job.id)}`; }
+        if (submit) submit.disabled = false;
+        return;
+      }
+      case 'settings': {
+        const num = (k) => Number(fd.get(k));
+        const config = {
+          baseUrl: fd.get('baseUrl'),
+          browsers: fd.getAll('browsers'),
+          auth: fd.get('hasAuth') ? { loginPath: fd.get('auth.loginPath'), usernameLabel: fd.get('auth.usernameLabel'), passwordLabel: fd.get('auth.passwordLabel'), submitButton: fd.get('auth.submitButton') } : null,
+          safety: { allowedHosts: toList(fd.get('safety.allowedHosts')), blockedActions: toList(fd.get('safety.blockedActions')), maxPagesPerSession: num('safety.maxPagesPerSession'), maxMinutesPerSession: num('safety.maxMinutesPerSession') },
+          analyze: { maxPages: num('analyze.maxPages'), skipLinks: toList(fd.get('analyze.skipLinks')) },
+          ai: {
+            provider: fd.get('ai.provider'),
+            model: String(fd.get('ai.model')).trim(),
+            effort: fd.get('ai.effort'),
+            maxTurns: num('ai.maxTurns'),
+            openrouter: {
+              model: String(fd.get('ai.openrouter.model')).trim(),
+              baseUrl: String(fd.get('ai.openrouter.baseUrl')).trim(),
+              dataCollection: fd.get('ai.openrouter.dataCollection'),
+              zdr: fd.get('ai.openrouter.zdr') === '1',
+            },
+          },
+          jira: fd.get('hasJira') ? { baseUrl: fd.get('jira.baseUrl'), projectKey: String(fd.get('jira.projectKey')).trim(), issueType: fd.get('jira.issueType') || 'Bug', auth: fd.get('jira.auth'), labels: toList(fd.get('jira.labels'), /,/) } : null,
+        };
+        if (!config.browsers.length) throw new Error('Pick at least one browser.');
+        const current = await api('/api/settings');
+        if (current.config.auth) Object.assign(config.auth || {}, { usernameEnv: current.config.auth.usernameEnv, passwordEnv: current.config.auth.passwordEnv });
+        if (current.config.jira && config.jira) Object.assign(config.jira, { emailEnv: current.config.jira.emailEnv, tokenEnv: current.config.jira.tokenEnv });
+        const env = {};
+        for (const [k, v] of fd.entries()) {
+          if (k.startsWith('env:') && String(v) !== '') env[k.slice(4)] = String(v);
+          if (k.startsWith('clear:')) env[k.slice(6)] = null;
+        }
+        const r = await post('/api/settings', { config, env });
+        delete f.dataset.dirty;
+        await refreshState();
+        toast(`Settings saved.${r.notes.length ? '<br>' + r.notes.map(esc).join('<br>') : ''}`, 8000);
+        break;
+      }
+    }
+    render();
+  } catch (err) {
+    toastError(err);
+  } finally {
+    if (submit) submit.disabled = false;
+  }
+});
+
+function connect() {
+  const es = new EventSource('/api/events');
+  es.onopen = () => { $('#liveDot').style.background = '#3DD37A'; $('#liveText').textContent = 'Live · updates automatically'; };
+  es.onerror = () => { $('#liveDot').style.background = '#D03B3B'; $('#liveText').textContent = 'Reconnecting… (is traceqa ui still running?)'; };
+  es.addEventListener('change', () => { refreshState().then(liveRefresh); });
+  es.addEventListener('job-log', (ev) => {
+    const d = JSON.parse(ev.data);
+    const log = $('#joblog');
+    if (!log || log.dataset.job !== d.id) return;
+    const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 30;
+    log.append((log.textContent ? '\n' : '') + d.line);
+    if (atBottom) log.scrollTop = log.scrollHeight;
+  });
+  es.addEventListener('job', (ev) => {
+    const j = JSON.parse(ev.data);
+    refreshJobs();
+    if (j.status === 'done' || j.status === 'failed' || j.status === 'stopped') {
+      const [view, id] = route();
+      const watching = view === 'jobs' && (!id || id.toUpperCase() === j.id);
+      if (!watching) toast(`<b>${esc(j.label)}</b> ${j.status === 'done' ? 'finished' : j.status === 'stopped' ? 'was stopped' : '<span style="color:var(--danger)">failed</span>'}. <a href="#/jobs/${enc(j.id)}">Details</a>`, 8000);
+      refreshState().then(liveRefresh);
+    } else {
+      const [view] = route();
+      if (view === 'jobs') liveRefresh();
+    }
+  });
+}
+
+(async () => {
+  await refreshState();
+  window.addEventListener('hashchange', () => render());
+  await render();
+  refreshJobs();
+  connect();
+})();
+</script>
+</body>
+</html>

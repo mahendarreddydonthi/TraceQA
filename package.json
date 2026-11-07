@@ -1,0 +1,37 @@
+{
+  "name": "traceqa",
+  "version": "0.3.0",
+  "description": "Requirement-driven testing agent: maps requirements to your app, explores it, writes a Playwright framework and traces every result back to a requirement.",
+  "type": "module",
+  "bin": {
+    "traceqa": "dist/cli.js"
+  },
+  "main": "dist/index.js",
+  "files": [
+    "dist",
+    "ui"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/cli.ts",
+    "test": "tsx --test test/*.test.ts",
+    "smoke": "node scripts/smoke-mcp.mjs"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "1.6.0",
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "commander": "15.1.0",
+    "playwright": "1.65.0",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "4.23.15",
+    "typescript": "7.0.2"
+  },
+  "license": "UNLICENSED",
+  "private": true
+}
