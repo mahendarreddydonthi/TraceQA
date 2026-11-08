@@ -167,7 +167,7 @@ Everything the CLI does can be done here, except starting the MCP server:
 |---|---|
 | Setup (folder without a project) | App address, sign-in, test account, connect AI coding tools |
 | Overview | Next step with its button, a button per pipeline step, coverage report |
-| Requirements | Create, edit, upload, trash requirement files with a live check; import; map; clarify |
+| Requirements | Upload requirement documents (Word, PDF, text, Markdown); create, edit, trash requirement files with a live check; import; map; clarify |
 | App map | Analyze or re-analyze |
 | Explorer | AI exploration with live screenshots |
 | Framework | Create or refresh the framework, re-render, run or remove single tests |
@@ -176,6 +176,19 @@ Everything the CLI does can be done here, except starting the MCP server:
 | AI agent | Explore, write tests, or any task in plain words |
 | Jobs | Full live output, token use and approximate cost, Stop |
 | Settings | App address, browsers, sign-in, safety rules, AI provider (Anthropic or OpenRouter) with model, effort, key and privacy, Jira, connect AI coding tools |
+
+### Uploading requirement documents
+
+**Upload documents** on the Requirements page takes `.docx`, `.pdf`, `.txt` and `.md` files (up to 20 MB each, several at once). Each one is converted to a Markdown file in `requirements/` with the same name, imported, and mapped to pages. Markdown is kept as written. For the other formats:
+
+- A heading or line that starts with an ID such as `REQ-142` becomes a requirement, and its bullets or numbered items become acceptance criteria. Sub-headings such as "Acceptance criteria" under a requirement are dropped, so the criteria stay with it.
+- Other headings become feature names.
+- Word tables with an ID column (for example `ID | Title | Description | Acceptance criteria`) become one requirement per row.
+- PDFs need a text layer, so scanned PDFs can't be read. Lines broken by the page width are joined again, and page numbers are dropped.
+- If a file of the same name exists, the dashboard asks first, and the old version goes to `.traceqa/trash/`.
+- If no requirement is found, nothing is saved: the converted text opens in the file editor so you can add the IDs.
+
+**Upload document** on the Files page converts a file the same way, but opens it in the editor to check before saving.
 
 How it works:
 

@@ -7,9 +7,10 @@ import { activeModel, CONFIG_FILE, findProjectDir, loadProject, type Project } f
 import { listOpenRouterModels } from '../ai/openrouter.js';
 import { loadAppMap } from '../core/appMap.js';
 import {
-  clarify, importRequirements, listRequirementFiles, loadRequirements, openIssues, previewRequirements,
+  clarify, importRequirements, listRequirementFiles, loadRequirements, MAX_REQUIREMENT_FILE, openIssues, previewRequirements,
   readRequirementFile, resolveRequirementFile, trashRequirementFile, writeRequirementFile,
 } from '../core/requirements.js';
+import { convertRequirementDocument, MAX_UPLOAD } from '../core/documents.js';
 import { loadTraceability, mapRequirements } from '../core/mapper.js';
 import { describeStep, loadTests, removeTest, renderAll, specFileFor } from '../core/testgen.js';
 import { listRuns } from '../core/runner.js';
@@ -388,6 +389,49 @@ export async function startDashboard(
     }
   }
 
+  async function readRaw(req: http.IncomingMessage, limit: number): Promise<Buffer> {
+    const tooBig = () => httpError(413, `Files are limited to ${Math.round(limit / 1024 / 1024)} MB.`);
+    if (Number(req.headers['content-length'] ?? 0) > limit) throw tooBig();
+    let size = 0;
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) {
+      size += chunk.length;
+      if (size > limit) throw tooBig();
+      chunks.push(chunk);
+    }
+    return Buffer.concat(chunks);
+  }
+
+  /**
+   * POST /api/requirement-files/upload?name=<original file name>[&mode=convert][&replace=1], body = the file.
+   * Converts .md/.txt/.docx/.pdf to requirement Markdown. mode=convert only returns the Markdown (for the editor);
+   * otherwise the file is saved in the requirements folder and imported, unless no requirement was found in it.
+   * An existing file of the same name is only replaced with replace=1, and its old version goes to the trash.
+   */
+  async function handleUpload(url: URL, req: http.IncomingMessage, res: http.ServerResponse) {
+    const project = load();
+    const name = url.searchParams.get('name') ?? '';
+    const data = await readRaw(req, MAX_UPLOAD);
+    const doc = await convertRequirementDocument(name, data);
+    const found = previewRequirements(doc.markdown, doc.file);
+    const result = { file: doc.file, format: doc.format, notes: doc.notes, requirements: found.map((r) => r.id) };
+    if (url.searchParams.get('mode') === 'convert') return send(res, 200, { ...result, saved: false, content: doc.markdown });
+    if (!found.length) {
+      const reason = doc.markdown.trim()
+        ? 'No requirements found. Each one needs an ID such as REQ-142 at the start of its title.'
+        : 'No text found in the file.';
+      return send(res, 200, { ...result, saved: false, content: doc.markdown, reason });
+    }
+    if (Buffer.byteLength(doc.markdown) > MAX_REQUIREMENT_FILE) throw httpError(413, `The converted text is over ${MAX_REQUIREMENT_FILE / 1024} KB; split the document into smaller files.`);
+    const existed = fs.existsSync(resolveRequirementFile(project, doc.file));
+    if (existed && url.searchParams.get('replace') !== '1') {
+      return send(res, 409, { error: `${doc.file} already exists in the requirements folder.`, code: 'exists', file: doc.file });
+    }
+    const trashed = existed ? trashRequirementFile(project, doc.file) : null;
+    writeRequirementFile(project, doc.file, doc.markdown);
+    return send(res, 200, { ...result, saved: true, replaced: trashed, ...reimport(project) });
+  }
+
   async function handleGet(parts: string[], url: URL, res: http.ServerResponse) {
     if (parts[1] === 'state') return send(res, 200, state());
     const project = load();
@@ -644,6 +688,8 @@ export async function startDashboard(
       if (req.method === 'POST') {
         const origin = req.headers.origin;
         if (req.headers['x-traceqa'] !== '1' || (origin && !localOrigins.has(origin))) return send(res, 403, { error: 'Forbidden' });
+        // Uploads carry the file itself as the body, not JSON.
+        if (parts[1] === 'requirement-files' && parts[2] === 'upload' && parts.length === 3) return await handleUpload(url, req, res);
         return await handlePost(parts, await readBody(req), res);
       }
       return send(res, 405, { error: 'Method not allowed' });

@@ -218,10 +218,16 @@ function fmtUsage(u) {
 async function api(path, opts) {
   const res = await fetch(path, opts);
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw Object.assign(new Error(data.error || res.statusText), { status: res.status });
+  if (!res.ok) throw Object.assign(new Error(data.error || res.statusText), { status: res.status, data });
   return data;
 }
 const post = (path, body) => api(path, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-TraceQA': '1' }, body: JSON.stringify(body || {}) });
+
+// Requirement documents: Markdown as is; text, Word and PDF are converted to TraceQA's Markdown on the server.
+const DOC_ACCEPT = '.md,.markdown,.txt,.docx,.pdf,text/markdown,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+const MAX_UPLOAD = 20 * 1024 * 1024;
+const uploadFile = (file, mode, replace) =>
+  api(`/api/requirement-files/upload?name=${enc(file.name)}&mode=${mode}${replace ? '&replace=1' : ''}`, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream', 'X-TraceQA': '1' }, body: file });
 
 function q(s) { return "'" + String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "'"; }
 function locatorCode(l) {
@@ -286,6 +292,51 @@ function openDialog({ title, body, ok = 'OK', danger = false, wide = false }) {
 }
 async function confirmBox(title, html, ok = 'OK', danger = false) {
   return !!(await openDialog({ title, body: html, ok, danger }));
+}
+
+/** Saves and imports each picked document. A single file with no requirements in it opens in the editor instead. */
+async function uploadDocuments(files) {
+  const button = $('[data-action="upload-docs"]');
+  if (button) button.disabled = true;
+  const saved = [], skipped = [], failed = [];
+  let draft = null;
+  for (const [i, f] of files.entries()) {
+    toast(`Uploading ${esc(f.name)}${files.length > 1 ? ` (${i + 1} of ${files.length})` : ''}…`);
+    if (f.size > MAX_UPLOAD) { failed.push(`${f.name}: larger than 20 MB`); continue; }
+    try {
+      let r;
+      try {
+        r = await uploadFile(f, 'import');
+      } catch (err) {
+        if (err.data?.code !== 'exists') throw err;
+        const ok = await confirmBox('Replace an existing file?', `<p><span class="mono">${esc(err.data.file)}</span> is already in the requirements folder. Replace it with the content of <b>${esc(f.name)}</b>?</p><p class="sub">The current version moves to <span class="mono">.traceqa/trash/</span>, so you can get it back.</p>`, 'Replace');
+        if (!ok) { skipped.push(`${f.name}: not uploaded, ${err.data.file} was kept`); continue; }
+        r = await uploadFile(f, 'import', true);
+      }
+      if (r.saved) saved.push({ name: f.name, r });
+      else { skipped.push(`${f.name}: ${r.reason}`); draft = draft || { ...r, from: f.name }; }
+    } catch (err) {
+      failed.push(`${f.name}: ${err.message}`);
+    }
+  }
+  S.reqs = null;
+  if (button) button.disabled = false;
+  if (draft && files.length === 1) {
+    S.draft = draft;
+    location.hash = '#/requirements/files/new';
+    toast(`${esc(draft.reason)} The text of ${esc(draft.from)} is in the editor: fix it there, then click “Save and import”.`, 12000);
+    return;
+  }
+  const last = saved.length ? saved[saved.length - 1].r : null;
+  const html = [
+    ...saved.map(({ name, r }) => `<div>Imported <b>${esc(name)}</b> as <span class="mono">${esc(r.file)}</span>: ${r.requirements.length} requirement(s)${r.replaced ? ', old version moved to the trash' : ''}.${r.notes.length ? ` <span class="sub">${esc(r.notes.join(' '))}</span>` : ''}</div>`),
+    last ? `<div class="sub">${last.imported} requirements in total${last.mapped ? ', mapped to pages' : ''}.${last.duplicates.length ? ' Duplicate IDs ignored: ' + esc(last.duplicates.join(', ')) : ''}</div>` : '',
+    ...skipped.map((m) => `<div class="warnbox">${esc(m)}</div>`),
+    ...failed.map((m) => `<div style="color:var(--danger)">${esc(m)}</div>`),
+  ].join('');
+  const problems = skipped.length + failed.length;
+  toast(`${html} ${problems ? `<button class="sm" onclick="this.parentNode.style.display='none'">Close</button>` : ''}`, problems ? 15000 : 7000);
+  if (!$('#dlg').open) render();
 }
 function aiFacts() {
   const ai = S.state.ai;
@@ -479,11 +530,13 @@ const views = {
     for (const r of d.rows) counts[r.status] = (counts[r.status] || 0) + 1;
     const rows = d.rows.filter((r) => reqFilter === 'all' || r.status === reqFilter);
     const filters = ['all', ...ORDER].filter((f) => counts[f]).map((f) => `<button data-action="req-filter" data-f="${f}" aria-pressed="${reqFilter === f}">${f === 'all' ? 'All' : STATUS[f][0]} ${counts[f]}</button>`).join('');
-    return header('Requirements', 'Each requirement traced to its criteria, tests, results and bugs', btn('import', 'Re-import') + btn('map', 'Map to pages') + `<a class="btn" href="#/requirements/files">Edit requirement files</a>` + btn('generate', 'Write tests for gaps', '', 'primary ai')) +
+    const upload = btn('upload-docs', 'Upload documents', 'title="Word (.docx), PDF, text or Markdown files with REQ-… requirements"') +
+      `<input id="uploadDocs" type="file" accept="${DOC_ACCEPT}" multiple hidden aria-label="Requirement documents to upload">`;
+    return header('Requirements', 'Each requirement traced to its criteria, tests, results and bugs', upload + btn('import', 'Re-import') + btn('map', 'Map to pages') + `<a class="btn" href="#/requirements/files">Edit requirement files</a>` + btn('generate', 'Write tests for gaps', '', 'primary ai')) +
       `<nav class="filters" aria-label="Requirements views"><a class="btn" href="#/requirements" aria-current="page">Requirements</a><a class="btn" href="#/requirements/files">Files</a></nav>
       ${d.rows.length ? `<div class="filters" role="group" aria-label="Filter by status">${filters}</div>` : ''}
       <section class="card" style="padding:6px 0 0"><div class="tbl"><table><thead><tr><th style="padding-left:20px">ID</th><th>Requirement</th><th>Criteria tested</th><th class="num">Tests</th><th>Status</th><th>Bugs</th></tr></thead><tbody>
-      ${rows.map((r) => `<tr class="click" data-href="#/requirements/${enc(r.requirementId)}"><td class="mono" style="padding-left:20px"><a href="#/requirements/${enc(r.requirementId)}">${esc(r.requirementId)}</a></td><td>${esc(r.title)}<div class="sub">${esc(r.feature)}${r.issues.length ? ` · ${r.issues.length} issue(s)` : ''}</div></td><td>${r.criteria.filter((c) => c.tests).length} of ${r.criteria.length}</td><td class="num">${r.tests}</td><td>${chip(STATUS, r.status)}</td><td>${r.bugs.map((b) => `<a href="#/bugs/${enc(b)}">${esc(b)}</a>`).join(', ')}</td></tr>`).join('') || '<tr><td colspan="6" class="empty" style="padding-left:20px">No requirements yet. <a href="#/requirements/files/new">Add a requirement file</a>.</td></tr>'}
+      ${rows.map((r) => `<tr class="click" data-href="#/requirements/${enc(r.requirementId)}"><td class="mono" style="padding-left:20px"><a href="#/requirements/${enc(r.requirementId)}">${esc(r.requirementId)}</a></td><td>${esc(r.title)}<div class="sub">${esc(r.feature)}${r.issues.length ? ` · ${r.issues.length} issue(s)` : ''}</div></td><td>${r.criteria.filter((c) => c.tests).length} of ${r.criteria.length}</td><td class="num">${r.tests}</td><td>${chip(STATUS, r.status)}</td><td>${r.bugs.map((b) => `<a href="#/bugs/${enc(b)}">${esc(b)}</a>`).join(', ')}</td></tr>`).join('') || `<tr><td colspan="6" class="empty" style="padding-left:20px">${d.rows.length ? 'No requirements with this status.' : `No requirements yet. ${btn('upload-docs', 'Upload a requirements document', '', 'sm')} (Word, PDF, text or Markdown) or <a href="#/requirements/files/new">write a requirement file</a>.`}</td></tr>`}
       </tbody></table></div></section>`;
   },
 
@@ -491,13 +544,17 @@ const views = {
     const d = await api('/api/requirement-files');
     const isNew = file === 'new' || (!file && !d.files.length);
     const current = isNew ? null : d.files.find((f) => f.file === file) || d.files[0];
-    const content = current ? (await api(`/api/requirement-files/content?file=${enc(current.file)}`)).content : REQ_TEMPLATE;
+    // An uploaded document with no requirements found in it opens here, unsaved, so it can be fixed.
+    const draft = isNew ? S.draft : null;
+    S.draft = null;
+    const content = draft ? draft.content : current ? (await api(`/api/requirement-files/content?file=${enc(current.file)}`)).content : REQ_TEMPLATE;
     const list = d.files.map((f) => `<a class="item" href="#/requirements/files/${enc(f.file)}" aria-current="${!!current && f.file === current.file}"><b class="mono">${esc(f.file)}</b><div class="sub">${f.requirements} requirement(s) · ${when(f.updatedAt)}</div></a>`).join('');
-    return header('Requirement files', `<a href="#/requirements">Requirements</a> · Markdown files in <span class="mono">${esc(d.dir)}/</span>`, `<a class="btn" href="#/requirements/files/new">New file</a>${btn('upload', 'Upload .md')}<input id="uploadMd" type="file" accept=".md,text/markdown" hidden aria-label="Requirement file to upload">`) +
+    return header('Requirement files', `<a href="#/requirements">Requirements</a> · Markdown files in <span class="mono">${esc(d.dir)}/</span>`, `<a class="btn" href="#/requirements/files/new">New file</a>${btn('upload', 'Upload document', 'title="Word (.docx), PDF, text or Markdown; it opens here to check before saving"')}<input id="uploadMd" type="file" accept="${DOC_ACCEPT}" hidden aria-label="Requirement document to upload">`) +
       `<nav class="filters" aria-label="Requirements views"><a class="btn" href="#/requirements">Requirements</a><a class="btn" href="#/requirements/files" aria-current="page">Files</a></nav>
       <div class="split"><div class="list card" style="padding:8px">${list || '<p class="empty" style="padding:8px">No files yet.</p>'}</div>
-      <div class="detail stack"><section class="card"><form data-form="reqfile" class="stack" data-previous="${esc(current ? current.file : '')}">
-        <label class="field">File name <input name="file" required value="${esc(current ? current.file : 'new-feature.md')}" pattern="[A-Za-z0-9 _.\\-/]+\\.md" title="Letters, numbers, spaces, dashes and underscores, ending in .md"></label>
+      <div class="detail stack"><section class="card"><form data-form="reqfile" class="stack" data-previous="${esc(current ? current.file : '')}"${draft ? ' data-dirty="1"' : ''}>
+        ${draft ? `<div class="warnbox">Converted from <b>${esc(draft.from)}</b> but not saved yet: ${esc(draft.reason)} Give each requirement a heading that starts with its ID (<span class="mono">## REQ-142 Title</span>) and list its acceptance criteria as bullets under it.${draft.notes.length ? ' ' + esc(draft.notes.join(' ')) : ''}</div>` : ''}
+        <label class="field">File name <input name="file" required value="${esc(draft ? draft.file : current ? current.file : 'new-feature.md')}" pattern="[A-Za-z0-9 _.\\-/]+\\.md" title="Letters, numbers, spaces, dashes and underscores, ending in .md"></label>
         <label class="field">Content <textarea class="editor" name="content" spellcheck="true" id="reqEditor">${esc(content)}</textarea>
           <span class="hint">A requirement is a heading that starts with an ID like REQ-142. Bullets under it are acceptance criteria. A top-level # heading sets the feature.</span></label>
         <div class="btns"><button class="primary" type="submit">Save and import</button>${current ? btn('reqfile-delete', 'Move to trash', `data-file="${esc(current.file)}"`, 'danger') : ''}</div>
@@ -779,14 +836,21 @@ const mounts = {
     const up = $('#uploadMd');
     up.addEventListener('change', async () => {
       const f = up.files[0];
+      up.value = ''; // so picking the same file again still loads it
       if (!f) return;
-      if (f.size > 512 * 1024) return toast('That file is over 512 KB.', 5000);
-      ed.value = await f.text();
-      form.elements.file.value = f.name.replace(/[^A-Za-z0-9 _.\-]/g, '-');
-      form.dataset.previous = '';
-      form.dataset.dirty = '1';
-      preview();
-      toast(`Loaded ${esc(f.name)}. Check it, then click “Save and import”.`, 5000);
+      if (f.size > MAX_UPLOAD) return toast('That file is larger than 20 MB.', 5000);
+      try {
+        toast(`Reading ${esc(f.name)}…`);
+        const r = await uploadFile(f, 'convert');
+        ed.value = r.content;
+        form.elements.file.value = r.file;
+        form.dataset.previous = '';
+        form.dataset.dirty = '1';
+        preview();
+        toast(`Loaded ${esc(f.name)}${r.format === 'markdown' ? '' : ' (converted to Markdown)'}. Check it, then click “Save and import”.${r.notes.length ? ' ' + esc(r.notes.join(' ')) : ''}`, 7000);
+      } catch (err) {
+        toastError(err);
+      }
     });
   },
   jobs() {
@@ -910,6 +974,7 @@ document.addEventListener('click', async (e) => {
     if (a === 'refresh') { document.querySelectorAll('#main form[data-dirty]').forEach((f) => delete f.dataset.dirty); return render(); }
     if (a === 'bug-edit') { const s = $('#bugEdit'); s.hidden = !s.hidden; if (!s.hidden) s.querySelector('input').focus(); else delete s.querySelector('form').dataset.dirty; return; }
     if (a === 'upload') return $('#uploadMd').click();
+    if (a === 'upload-docs') return $('#uploadDocs').click();
     if (a === 'run-dialog') return await runDialog();
     if (a === 'run-req') return await runDialog({ requirementId: el.dataset.req });
     if (a === 'run-test') return await startJob({ kind: 'run', testId: el.dataset.test });
@@ -974,6 +1039,12 @@ document.addEventListener('input', (e) => {
   if (f) f.dataset.dirty = '1';
 });
 document.addEventListener('change', (e) => {
+  if (e.target.id === 'uploadDocs') {
+    const files = [...e.target.files];
+    e.target.value = '';
+    if (files.length) uploadDocuments(files);
+    return;
+  }
   const t = e.target.closest('[data-toggle]');
   if (t) { const target = $(t.dataset.toggle); if (target) target.hidden = !t.checked; }
   const p = e.target.closest('[data-provider-switch]');

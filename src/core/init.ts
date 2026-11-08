@@ -138,6 +138,7 @@ Put one or more Markdown files here. TraceQA reads every \`.md\` file except thi
 - A requirement is a heading that starts with an ID like \`REQ-142\`.
 - Bullets under it are acceptance criteria. \`AC1:\` prefixes are optional.
 - A top-level \`# Heading\` sets the feature name for the requirements below it.
+- In the dashboard (\`traceqa ui\`), "Upload documents" on the Requirements page also takes Word (.docx), PDF and text files and converts them to Markdown here.
 `,
   );
 
