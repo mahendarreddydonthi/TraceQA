@@ -2,34 +2,19 @@
 
 TraceQA is a requirement-driven testing agent for **web apps**. It reads your requirements (Markdown, Word, PDF or Jira), maps them to the pages of your app, explores the app in a real browser, writes a plain Playwright framework, runs it, repairs tests broken by UI changes, and traces every result and bug back to a requirement.
 
+TraceQA is an open-source project, inspired by [Testver](https://testver.com).
+
 Scope is web only: desktop Chromium, Firefox and WebKit. Native mobile apps and mobile emulation are out of scope.
 
 There are three ways in, and all three share the same project files:
 
 - **The dashboard** (double-click `TraceQA Dashboard.cmd`, or `traceqa ui`). Everything can be done with buttons, from first-time setup to filing bugs, so nobody needs a terminal.
 - **AI coding tools** (Claude Code, Codex, Cursor, Antigravity, any MCP client). TraceQA runs as an MCP server and the tool's own model does the reasoning, so no extra API key is needed.
-- **The CLI** (`traceqa …`). Everyday steps need no AI. `explore`, `generate`, `heal --ai` and `agent` use TraceQA's built-in agent: Claude, any model on OpenRouter, or a local model in Ollama or LM Studio.
+- `explore`, `generate`, `heal --ai` and `agent` use TraceQA's built-in agent: Claude, any model on OpenRouter, or a local model in Ollama or LM Studio.
 
 No requirements yet? TraceQA can also explore the app on its own, find bugs, and turn the flows that work into E2E tests.
 
 The tests it writes are plain Playwright. They run with `npx playwright test`, with no AI involved.
-
-## What's new
-
-| Area | v0.1 | v0.2 | v0.3 | v0.4 | v0.5 |
-|---|---|---|---|---|---|
-| App analysis, requirements, mapping, framework, test runs, coverage report | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Exploration and test writing from AI coding tools (MCP) | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Standalone AI agent: `explore`, `generate`, `agent`, `heal --ai` | – | ✅ | ✅ | ✅ | ✅ |
-| Automatic healing of tests broken by UI changes (assertions are never touched) | – | ✅ | ✅ | ✅ | ✅ |
-| Jira filing with evidence attached and duplicate detection | – | ✅ | ✅ | ✅ | ✅ |
-| Live dashboard | – | view, run, heal, file | every action | every action | every action |
-| Heal preview, Stop for any job, AI token use and cost | – | – | ✅ | ✅ | ✅ |
-| AI providers | – | Anthropic | + OpenRouter | + Ollama, LM Studio (local) | all four |
-| Requirement documents (Markdown, text, Word, PDF) | ID format only | ID format only | ID format only | converted to the ID format | **any format, read as they are** |
-| Requirements from Jira issues (keys become requirement IDs) | – | – | – | ✅ | ✅ |
-| Exploring without requirements: find bugs, automate the working flows as E2E tests | – | – | – | ✅ | ✅ |
-| Mobile | – | out of scope | out of scope | out of scope | out of scope |
 
 ## Install (from this folder, until it is published to npm)
 
@@ -302,3 +287,7 @@ npm run smoke
 ```
 
 `npm run smoke` needs the Demo Store running on port 4173. `scripts/mock-jira.mjs` is a stand-in for the Jira REST API, for trying `bugs file` without a real Jira.
+
+## License
+
+TraceQA is open source under the [MIT License](LICENSE). It was inspired by [Testver](https://testver.com).
