@@ -1,7 +1,11 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { z } from 'zod';
 import { loadProject, type Project } from '../core/config.js';
+import { importDocument } from '../core/documents.js';
+import { importJiraRequirements } from '../core/jira-import.js';
 import { analyzeApp, loadAppMap } from '../core/appMap.js';
-import { clarify, importRequirements, loadRequirements, openIssues } from '../core/requirements.js';
+import { addDiscoveredFlow, clarify, documentText, importRequirements, loadRequirements, openIssues, requirementsFromFile, resolveRequirementFile, saveReading } from '../core/requirements.js';
 import { loadTraceability, mapRequirements } from '../core/mapper.js';
 import { ExploreSession } from '../core/explorer.js';
 import { LocatorSchema } from '../core/locators.js';
@@ -76,11 +80,13 @@ export function buildTools(projectDir?: string, ctx: ToolContext = {}): ToolDef[
     {
       name: 'import_requirements',
       title: 'Import requirements',
-      description: 'Reads the Markdown requirement files and flags criteria that cannot be tested as written.',
+      description:
+        'Reads every requirement document in the requirements folder, whatever its format (Markdown, text, Word, PDF; headings, user stories, lists, tables or plain sentences), and flags criteria that cannot be tested as written. Requirements without an ID in the document get a stable REQ-### ID.',
       inputSchema: {},
-      run: () => {
-        const { file, files, duplicates } = importRequirements(load());
-        const lines = [`Imported ${file.requirements.length} requirements from ${files.length} files (${files.join(', ')}).`];
+      run: async () => {
+        const { file, files, duplicates, documents } = await importRequirements(load());
+        const lines = [`Imported ${file.requirements.length} requirements from ${files.length} documents.`];
+        for (const d of documents) lines.push(`  ${d.file} (${d.type}, read ${d.mode === 'ai' ? 'by AI' : d.mode === 'ids' ? 'by its IDs' : 'free-form'}): ${d.requirements} requirement(s), ${d.criteria} criteria${d.reading?.stale ? ' · changed since its AI reading' : ''}`);
         for (const r of file.requirements) {
           const issues = openIssues(r);
           lines.push(`- ${r.id} ${r.title} [${r.feature}] · ${r.criteria.length} criteria${issues.length ? ` · ${issues.length} issue(s)` : ''}`);
@@ -88,6 +94,87 @@ export function buildTools(projectDir?: string, ctx: ToolContext = {}): ToolDef[
         }
         if (duplicates.length) lines.push(`Duplicate IDs ignored: ${duplicates.join(', ')}`);
         return lines.join('\n');
+      },
+    },
+    {
+      name: 'import_requirement_document',
+      title: 'Add a requirement document',
+      description:
+        'Adds a Word (.docx), PDF, text or Markdown document from the project to the requirements folder as it is (any format, no conversion) and imports it. If few requirements are found, read it with read_requirement_document and save what you understand with save_document_reading.',
+      inputSchema: { path: z.string().describe('Path of the document, relative to the project folder') },
+      run: async ({ path: p }: { path: string }) => {
+        const project = load();
+        const full = path.resolve(project.dir, p);
+        if (!full.startsWith(path.resolve(project.dir) + path.sep) || !fs.existsSync(full)) throw new Error(`No file ${p} inside the project folder.`);
+        const inside = full.startsWith(path.resolve(project.paths.requirementsDir) + path.sep);
+        if (inside) {
+          const r = await importRequirements(project);
+          const d = r.documents.find((x) => path.resolve(project.paths.requirementsDir, x.file) === full);
+          return `${p} is already in the requirements folder: ${d?.requirements ?? 0} requirement(s), ${d?.criteria ?? 0} criteria.`;
+        }
+        const r = await importDocument(project, path.basename(full), fs.readFileSync(full));
+        return [
+          `Added ${p} (${r.kind}) as requirements/${r.file}: ${r.requirements} requirement(s), ${r.criteria} acceptance criteria.`,
+          ...r.warnings.map((w) => `Warning: ${w}`),
+          r.suggestAi ? 'Few requirements were found automatically. Call read_requirement_document, then save_document_reading with the requirements you find.' : 'Call map_requirements next.',
+        ].join('\n');
+      },
+    },
+    {
+      name: 'read_requirement_document',
+      title: 'Read a requirement document',
+      description: 'Returns the text of a requirement document (Word and PDF included) and what TraceQA understood from it, so you can check it or read it yourself.',
+      inputSchema: { file: z.string().describe('File inside the requirements folder, e.g. specs/checkout.docx') },
+      readOnly: true,
+      run: async ({ file }: { file: string }) => {
+        const project = load();
+        const { text } = await documentText(project, resolveRequirementFile(project, file, true));
+        const reqs = requirementsFromFile(project, file);
+        return [
+          `TraceQA currently reads ${reqs.length} requirement(s) from ${file}: ${reqs.map((r) => `${r.id} (${r.criteria.length} criteria)`).join(', ') || 'none'}.`,
+          '--- document text ---',
+          text.length > 100_000 ? `${text.slice(0, 100_000)}\n… (cut at 100,000 characters)` : text,
+        ].join('\n');
+      },
+    },
+    {
+      name: 'save_document_reading',
+      title: 'Save how a document reads',
+      description:
+        "Saves the requirements you read from a requirement document (any format) when TraceQA's automatic reading missed things. Use the document's own words; give an id only if the document has one. Kept until the document changes.",
+      inputSchema: {
+        file: z.string().describe('File inside the requirements folder'),
+        requirements: z
+          .array(
+            z.object({
+              id: z.string().optional().describe('Only if the document gives one, e.g. FR-12'),
+              feature: z.string().optional(),
+              title: z.string(),
+              description: z.string().optional(),
+              criteria: z.array(z.string()).describe('Observable outcomes a browser test can check'),
+            }),
+          )
+          .min(1),
+      },
+      run: async ({ file, requirements }: { file: string; requirements: { id?: string; feature?: string; title: string; description?: string; criteria: string[] }[] }) => {
+        const project = load();
+        await saveReading(project, file, requirements, 'AI coding tool');
+        await importRequirements(project);
+        const reqs = requirementsFromFile(project, file);
+        return `Saved. ${file} now reads as ${reqs.length} requirement(s): ${reqs.map((r) => `${r.id} ${r.title}`).join('; ')}. Call map_requirements next.`;
+      },
+    },
+    {
+      name: 'import_jira_requirements',
+      title: 'Import requirements from Jira',
+      description: 'Reads Jira issues (default: open stories of the configured project) into requirements/jira/<project>.md, with the Jira key as the requirement ID and acceptance criteria from the description or a custom field, then imports them.',
+      inputSchema: {
+        jql: z.string().optional().describe('Jira query; default from the config, e.g. project = SHOP AND issuetype = Story'),
+        max: z.number().int().positive().max(1000).optional().describe('At most this many issues (default 200)'),
+      },
+      run: async ({ jql, max }: { jql?: string; max?: number }) => {
+        const r = await importJiraRequirements(load(), { jql, max, log });
+        return `Imported ${r.issues} Jira issue(s) into requirements/${r.file} (${r.withCriteria} with acceptance criteria): ${r.keys.slice(0, 30).join(', ')}${r.keys.length > 30 ? ' …' : ''}\nJQL: ${r.jql}\nCall map_requirements next. Issues without criteria show as unclear until someone adds them in Jira.`;
       },
     },
     {
@@ -135,7 +222,7 @@ export function buildTools(projectDir?: string, ctx: ToolContext = {}): ToolDef[
         const tests = loadTests(project).filter((t) => t.requirementId === id);
         return [
           `${req.id} · ${req.title} (${req.feature})`,
-          `Source: ${req.source.file}:${req.source.line}`,
+          `Source: ${req.source.file}${req.source.line ? `:${req.source.line}` : ''}${req.source.section ? ` (${req.source.section})` : ''}${req.autoId ? ' · ID assigned by TraceQA' : ''}`,
           req.description ? `Description: ${req.description}` : '',
           `Status: ${cov.status} · ${cov.tests} tests`,
           'Criteria:',
@@ -232,6 +319,21 @@ export function buildTools(projectDir?: string, ctx: ToolContext = {}): ToolDef[
       description: 'Closes the browser and writes the session report.',
       inputSchema: {},
       run: () => active().end(),
+    },
+    {
+      name: 'save_discovered_flow',
+      title: 'Save a discovered flow',
+      description:
+        'While exploring without a requirement: records a user flow that works today as an E2E requirement (E2E-001 …) in requirements/discovered-flows.md, so you can save_test for it. Criteria describe exactly what the user sees. A person should confirm it is the intended behaviour.',
+      inputSchema: {
+        title: z.string().describe('The flow, e.g. "Search finds a product by part of its name"'),
+        description: z.string().optional().describe('One sentence: who does what'),
+        criteria: z.array(z.string()).min(1).max(10).describe('Observable outcomes, e.g. "Searching for \\"head\\" lists Wireless Headphones"'),
+      },
+      run: async (a: { title: string; description?: string; criteria: string[] }) => {
+        const req = await addDiscoveredFlow(load(), a);
+        return `Saved ${req.id} "${req.title}" with ${req.criteria.length} criteria (${req.criteria.map((c) => c.id).join(', ')}). Now save_test once per criterion with requirementId ${req.id}.`;
+      },
     },
     {
       name: 'scaffold_framework',

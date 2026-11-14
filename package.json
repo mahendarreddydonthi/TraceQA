@@ -1,6 +1,6 @@
 {
   "name": "traceqa",
-  "version": "0.3.0",
+  "version": "0.5.0",
   "description": "Requirement-driven testing agent: maps requirements to your app, explores it, writes a Playwright framework and traces every result back to a requirement.",
   "type": "module",
   "bin": {
@@ -24,6 +24,8 @@
     "@anthropic-ai/sdk": "1.6.0",
     "@modelcontextprotocol/sdk": "1.32.2",
     "commander": "15.1.0",
+    "mammoth": "1.13.0",
+    "pdfjs-dist": "6.4.299",
     "playwright": "1.65.0",
     "zod": "4.6.7"
   },

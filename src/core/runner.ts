@@ -4,7 +4,7 @@ import type { Project } from './config.js';
 import { runProcess } from './proc.js';
 import { hasInstalledDeps } from './scaffold.js';
 import { describeStep, loadTests, recordVerification, testTitle } from './testgen.js';
-import { loadRequirements } from './requirements.js';
+import { loadRequirements, REQ_ID } from './requirements.js';
 import { draftBug } from './bugs.js';
 import { listJson, nextId, now, writeJson } from './store.js';
 import type { RunRecord, TestDef, TestResult, Verdict } from './types.js';
@@ -81,7 +81,7 @@ interface JsonSuite {
 
 function collect(suite: JsonSuite, out: TestResult[], defs: TestDef[]): void {
   for (const spec of suite.specs ?? []) {
-    const req = spec.title.match(/@(REQ-[A-Za-z0-9_-]+)/)?.[1];
+    const req = spec.title.match(new RegExp(`@(${REQ_ID})`))?.[1];
     const ac = spec.title.match(/^(AC\d+)\b/)?.[1];
     const def = defs.find((d) => testTitle(d) === spec.title);
     for (const t of spec.tests) {

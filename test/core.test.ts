@@ -34,6 +34,9 @@ test('parses requirements, criteria and features from Markdown', () => {
 test('flags vague and UI-unreachable wording, but not words inside quotes', () => {
   assert.equal(checkText('Results appear quickly')[0].kind, 'vague');
   assert.equal(checkText('The customer receives an email')[0].kind, 'no-ui-path');
+  assert.equal(checkText('A confirmation e-mail is sent to the email address on the account')[0].kind, 'no-ui-path', 'a sent email is still flagged');
+  assert.equal(checkText('The payment page asks for an email address').length, 0, 'an email field is testable');
+  assert.equal(checkText('Users sign in with email and password').length, 0);
   assert.equal(checkText('The page shows "Search quickly"').length, 0);
   assert.equal(checkText('An expired code shows "This coupon has expired"').length, 0);
 });

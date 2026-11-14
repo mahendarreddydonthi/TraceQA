@@ -1,6 +1,6 @@
-# TraceQA v0.3
+# TraceQA v0.5
 
-TraceQA is a requirement-driven testing agent for **web apps**. It reads your requirements, maps them to the pages of your app, explores the app in a real browser, writes a plain Playwright framework, runs it, repairs tests broken by UI changes, and traces every result and bug back to a requirement.
+TraceQA is a requirement-driven testing agent for **web apps**. It reads your requirements (Markdown, Word, PDF or Jira), maps them to the pages of your app, explores the app in a real browser, writes a plain Playwright framework, runs it, repairs tests broken by UI changes, and traces every result and bug back to a requirement.
 
 Scope is web only: desktop Chromium, Firefox and WebKit. Native mobile apps and mobile emulation are out of scope.
 
@@ -8,24 +8,28 @@ There are three ways in, and all three share the same project files:
 
 - **The dashboard** (double-click `TraceQA Dashboard.cmd`, or `traceqa ui`). Everything can be done with buttons, from first-time setup to filing bugs, so nobody needs a terminal.
 - **AI coding tools** (Claude Code, Codex, Cursor, Antigravity, any MCP client). TraceQA runs as an MCP server and the tool's own model does the reasoning, so no extra API key is needed.
-- **The CLI** (`traceqa …`). Everyday steps need no AI. `explore`, `generate`, `heal --ai` and `agent` use TraceQA's built-in Claude agent with your Anthropic API key.
+- **The CLI** (`traceqa …`). Everyday steps need no AI. `explore`, `generate`, `heal --ai` and `agent` use TraceQA's built-in agent: Claude, any model on OpenRouter, or a local model in Ollama or LM Studio.
+
+No requirements yet? TraceQA can also explore the app on its own, find bugs, and turn the flows that work into E2E tests.
 
 The tests it writes are plain Playwright. They run with `npx playwright test`, with no AI involved.
 
 ## What's new
 
-| Area | v0.1 | v0.2 | v0.3 |
-|---|---|---|---|
-| App analysis, requirements, mapping, framework, test runs, coverage report | ✅ | ✅ | ✅ |
-| Exploration and test writing from AI coding tools (MCP) | ✅ | ✅ | ✅ |
-| Standalone AI agent in the CLI: `explore`, `generate`, `agent`, `heal --ai` | – | ✅ | ✅ |
-| Automatic healing of tests broken by UI changes (assertions are never touched) | – | ✅ | ✅ |
-| Jira filing with evidence attached and duplicate detection | – | ✅ | ✅ |
-| Live dashboard | – | view, run, heal, file | **every action**, see below |
-| Heal preview with apply or reject per fix | – | – | ✅ |
-| Stop any running job; AI token use and cost per job | – | – | ✅ |
-| OpenRouter as the AI provider (Claude or any tool-calling model) | – | – | ✅ |
-| Mobile | – | out of scope | out of scope |
+| Area | v0.1 | v0.2 | v0.3 | v0.4 | v0.5 |
+|---|---|---|---|---|---|
+| App analysis, requirements, mapping, framework, test runs, coverage report | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Exploration and test writing from AI coding tools (MCP) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Standalone AI agent: `explore`, `generate`, `agent`, `heal --ai` | – | ✅ | ✅ | ✅ | ✅ |
+| Automatic healing of tests broken by UI changes (assertions are never touched) | – | ✅ | ✅ | ✅ | ✅ |
+| Jira filing with evidence attached and duplicate detection | – | ✅ | ✅ | ✅ | ✅ |
+| Live dashboard | – | view, run, heal, file | every action | every action | every action |
+| Heal preview, Stop for any job, AI token use and cost | – | – | ✅ | ✅ | ✅ |
+| AI providers | – | Anthropic | + OpenRouter | + Ollama, LM Studio (local) | all four |
+| Requirement documents (Markdown, text, Word, PDF) | ID format only | ID format only | ID format only | converted to the ID format | **any format, read as they are** |
+| Requirements from Jira issues (keys become requirement IDs) | – | – | – | ✅ | ✅ |
+| Exploring without requirements: find bugs, automate the working flows as E2E tests | – | – | – | ✅ | ✅ |
+| Mobile | – | out of scope | out of scope | out of scope | out of scope |
 
 ## Install (from this folder, until it is published to npm)
 
@@ -57,7 +61,7 @@ Or with the CLI:
 cd your-project
 traceqa init --url https://staging.your-app.test --agents
 copy .env.example .env               (then fill in a TEST account)
-(add requirement files under requirements/)
+(put your requirement documents in requirements/ as they are: .md, .txt, .docx or .pdf, or: traceqa requirements import-jira)
 traceqa analyze
 traceqa requirements import
 traceqa map
@@ -77,12 +81,16 @@ Then pick how to work:
 | `traceqa init [--url] [--agents] [--npx]` | | Set up a project (and connect AI coding tools) |
 | `traceqa status` | | What exists and the next step |
 | `traceqa analyze [--max-pages n]` | | Crawl the app into `.traceqa/app-map.json` |
-| `traceqa requirements import` | | Read `requirements/*.md`, flag unclear criteria |
+| `traceqa requirements import` | | Read every document in `requirements/` (any format), flag unclear criteria |
+| `traceqa requirements import-doc <file> [--ai]` | `--ai` | Copy a Word (.docx), PDF, text or Markdown document into `requirements/` as it is and read it; `--ai` also reads it with AI |
+| `traceqa requirements read-ai <file>` | ✓ | Read a document in `requirements/` with AI when the automatic reading misses things |
+| `traceqa requirements import-jira [--jql …] [--max n]` | | Import Jira issues as requirements |
 | `traceqa requirements clarify REQ-118 AC1 <text>` | | Save a testable wording agreed with the team |
 | `traceqa map` | | Link requirements to pages |
 | `traceqa scaffold [--no-install]` | | Create or refresh the Playwright framework in `e2e/` |
 | `traceqa render` | | Re-render page objects and specs from the app map and saved tests |
 | `traceqa explore --req REQ-142 [--charter …] [--headed]` | ✓ | Explore one requirement in a real browser; findings become draft bugs |
+| `traceqa explore [--area /cart] [--sign-in] [--write-tests] [--max-flows n]` | ✓ | Explore the whole app without requirements; `--write-tests` saves the working flows as E2E requirements with tests (every flow it finds, or at most `n`) |
 | `traceqa generate --req REQ-1 REQ-2 \| --gaps \| --all` | ✓ | Write one test per acceptance criterion, check each, run them |
 | `traceqa agent "<task>"` | ✓ | Any task in plain words |
 | `traceqa run [--req …] [--grep …] [--browser …]` | | Run tests, sort failures, draft bugs |
@@ -96,14 +104,70 @@ Then pick how to work:
 
 All commands accept `--project <dir>`. Otherwise the nearest folder with `traceqa.config.json` is used.
 
+## Requirements
+
+Requirements don't need a special format. Put your documents in `requirements/` as they are (Markdown, text, Word .docx or PDF, in sub-folders if you like) and TraceQA reads them in place. It never rewrites them.
+
+How a document is read:
+
+- **Sections become requirements.** Each heading with content under it is a requirement. Its bullet points, numbered items, table rows, Given/When/Then scenarios and "should / must / shows" sentences become acceptance criteria.
+- **Context is skipped.** Introduction, scope, glossary, dependencies, references and similar sections are not requirements. "Acceptance criteria" or "Business rules" sub-headings are merged into the requirement above them.
+- **Other shapes work too.** User stories ("As a …, I want …"), a plain numbered list, or a short brief of a few paragraphs.
+- **IDs are optional.** If the document has IDs (`REQ-142`, `FR-12`, a Jira key), they are used. Otherwise TraceQA gives each requirement a stable `REQ-…` ID, kept in `.traceqa/requirement-ids.json` (commit it). Editing the document, or inserting a section, doesn't renumber the others.
+
+If you want exact IDs and criteria, the strict form still works and always wins:
+
+```markdown
+# Checkout
+## REQ-142 Valid coupon applies a discount
+- AC1: SAVE10 takes 10% off the total
+- AC2: Codes are not case-sensitive
+```
+
+**Read with AI** (a button on the document, `traceqa requirements read-ai <file>`, or your AI coding tool through `read_requirement_document` and `save_document_reading`) helps when a document is mostly prose and the automatic reading finds too little. The AI's reading is saved next to the document in `.traceqa/readings/`, uses the document's own words, keeps only IDs that appear in the document, and is marked "Read by AI" for review. The document itself is not changed. If the document changes later, TraceQA goes back to the automatic reading and marks the AI reading as out of date.
+
+Where requirements come from:
+
+- **Your documents**, added to the folder, uploaded in the dashboard (Requirements → Upload document), or with `traceqa requirements import-doc`. Old `.doc` files need saving as .docx first. Scanned PDFs need OCR first. In PDFs, larger text becomes headings.
+- **The dashboard editor**, for Markdown and text files, with a live preview of what TraceQA understands.
+- **Jira** (Requirements → Import from Jira, `traceqa requirements import-jira`, or the `import_jira_requirements` MCP tool):
+  - Uses the Jira site and credentials from the Jira settings. The default query is the open stories of the project; set `jira.requirementsJql` to change it.
+  - Each issue becomes a requirement with its Jira key as the ID, grouped by component. Acceptance criteria come from an "Acceptance criteria" section in the description (bullets, or Given/When/Then scenarios), or from a custom field (`jira.acceptanceCriteriaField`, e.g. `customfield_10035`).
+  - Jira Cloud and Data Center are both supported. Results go to `requirements/jira/<project>.md`, which is replaced on every sync, so edit requirements in Jira.
+
+## Exploring without requirements
+
+Explorer → **Explore the app…** (or `traceqa explore` without `--req`) lets the agent browse the app like an exploratory tester:
+
+- It visits the main pages and flows, tries edge cases (empty, invalid and long input, going back, repeating actions), and watches console errors and failed requests.
+- It records real problems as draft bugs with screenshots.
+- With **Also automate the flows it finds** (`--write-tests`), it saves each flow that works today as an E2E requirement (`E2E-001` …) in `requirements/discovered-flows.md`, writes a test per criterion, and runs them.
+- **Flows to automate** is optional. Leave it empty to automate every working flow the exploration finds, or enter a number (`--max-flows n`) to stop after that many, most important first. A long run can reach the AI turn limit (Settings → AI agent).
+- While it runs, the job page shows where it is (Getting ready → Exploring the app → Automating flows → Running the new tests → Summary), what it is doing right now in plain words (for example “Clicking the button "Add to cart"”), running counts (steps, pages, problems, flows, tests), a timeline of every action, and the latest browser screenshot. The command line prints a heading for each phase.
+
+These flows describe what the app does now, not what it should do. Confirm them with the team; the dashboard marks them "Discovered".
+
 ## The standalone AI agent
 
-`explore`, `generate`, `agent` and `heal --ai` run a Claude tool-use loop over the same tools the MCP server offers.
+`explore`, `generate`, `agent`, `heal --ai` and the dashboard's AI buttons run a tool-use loop over the same tools the MCP server offers. Pick the provider in the dashboard under Settings → AI agent, or with `ai.provider` in `traceqa.config.json`:
 
-- **Provider:** `ai.provider` is `anthropic` (default, the Claude API) or `openrouter`. Change it in the dashboard under Settings → AI agent, or in `traceqa.config.json`.
-- **Model:** for Anthropic, `ai.model` (default `claude-opus-5-5`). For OpenRouter, `ai.openrouter.model` (default `anthropic/claude-opus-5.5`). Effort is `ai.effort` (default `high`) and the turn limit is `ai.maxTurns` (default 60), for both.
-- **Credentials:** `ANTHROPIC_API_KEY` or `OPENROUTER_API_KEY` from `.env` or the environment. With Anthropic, the SDK also accepts `ANTHROPIC_AUTH_TOKEN` or an `ant auth login` profile.
-- **Refusal fallback (Anthropic):** requests opt in to the API's server-side fallback (`fallbacks: "default"`). If the model declines a request for policy reasons, the API retries on its default fallback model.
+| Provider | `ai.provider` | Model setting | Key | Cost |
+|---|---|---|---|---|
+| Anthropic (Claude API) | `anthropic` (default) | `ai.model`, default `claude-opus-5-5` | `ANTHROPIC_API_KEY` | Billed; estimate from list prices |
+| OpenRouter | `openrouter` | `ai.openrouter.model`, default `anthropic/claude-opus-5.5` | `OPENROUTER_API_KEY` | Billed; the exact charge OpenRouter reports |
+| Ollama (on this computer) | `ollama` | `ai.ollama.model`, e.g. `qwen3` | none | Free |
+| LM Studio (on this computer) | `lmstudio` | `ai.lmstudio.model` | `LMSTUDIO_API_KEY`, only if its server requires one | Free |
+
+For every provider:
+
+- **Effort and turns:** effort is `ai.effort` (default `high`; not used by local models) and the turn limit is `ai.maxTurns` (default 60).
+- **Unattended:** the agent never approves, discards, files or deletes anything, and never clarifies requirements. Those tools are not offered to it. It skips unclear requirements and says so in its summary.
+- **Cost:** every run shows its token use. Paid providers show the cost and need a confirm in the dashboard. Start with one requirement to see what a run costs.
+- **Stopping:** Ctrl+C in the CLI, or Stop in the dashboard, ends the run cleanly and closes any exploration browser.
+
+### Anthropic
+
+`ANTHROPIC_API_KEY` from `.env` or the environment; the SDK also accepts `ANTHROPIC_AUTH_TOKEN` or an `ant auth login` profile. Requests opt in to the API's server-side refusal fallback (`fallbacks: "default"`): if the model declines a request for policy reasons, the API retries on its default fallback model.
 
 ### OpenRouter
 
@@ -115,15 +179,30 @@ All commands accept `--project <dir>`. Otherwise the nearest folder with `traceq
 }
 ```
 
-- **Models:** any OpenRouter model that supports tool calling. The dashboard's model picker lists them with their prices, using OpenRouter's public model list.
-- **How it's called:** OpenRouter's chat completions API, streamed. TraceQA sends `ai.effort` as `reasoning.effort` and passes reasoning back on tool calls, as OpenRouter requires. For Claude models it also turns on prompt caching and allows 64k output tokens; other models keep their own limits.
-- **Privacy:** `dataCollection: "deny"` (the default) only routes to providers that don't store or train on your data. `zdr: true` limits it further to Zero Data Retention endpoints. If no provider for your model matches, the job says so and points to these settings.
-- **Cost:** OpenRouter reports the exact charge for each request; jobs and the CLI show that total instead of an estimate.
-- **Differences from Anthropic:** Anthropic's server-side refusal fallback isn't available through OpenRouter. Models other than Claude may follow TraceQA's instructions less reliably, so try one requirement first.
-- **Errors:** a rejected key (401), no credits (402), an unknown model, or no matching provider each produce a plain message. Busy or failing providers (429, 5xx) are retried twice.
-- **Unattended:** the agent never approves, discards, files or deletes anything, and never clarifies requirements. Those tools are not offered to it. It skips unclear requirements and says so in its summary.
-- **Cost:** every AI run is billed to your Anthropic account. Start with one requirement (`--req`) to see the cost. Each run prints its token use and an approximate cost from list prices (Opus 5.5, Sonnet 5.5, Fable 5.1 and Opus 5; other models show tokens only). Your Anthropic Console has the exact bill.
-- **Stopping:** Ctrl+C in the CLI, or Stop in the dashboard, ends the run cleanly and closes any exploration browser.
+- **Models:** any OpenRouter model that supports tool calling. The dashboard's model picker lists them with their prices, from OpenRouter's public model list.
+- **How it's called:**
+  - OpenRouter's chat completions API, streamed. `ai.effort` is sent as `reasoning.effort`, and reasoning is passed back on tool calls, as OpenRouter requires.
+  - Claude models also get prompt caching and room for 64k output tokens; other models keep their own limits.
+- **Privacy:**
+  - `dataCollection: "deny"` (the default) only routes to providers that don't store or train on your data.
+  - `zdr: true` limits it further to Zero Data Retention endpoints.
+  - If no provider for your model matches, the job says so and points to these settings.
+- **Differences from Anthropic:** the server-side refusal fallback isn't available. Models other than Claude may follow TraceQA's instructions less reliably, so try one requirement first.
+
+### Ollama and LM Studio (local models)
+
+```json
+"ai": { "provider": "ollama", "ollama": { "model": "qwen3", "baseUrl": "http://localhost:11434", "contextLength": 32768 } }
+"ai": { "provider": "lmstudio", "lmstudio": { "model": "qwen2.5-7b-instruct", "baseUrl": "http://localhost:1234/v1" } }
+```
+
+- **Privacy and cost:** nothing leaves the computer, and there is no cost.
+- **Ollama:**
+  - TraceQA uses Ollama's native chat API, so it can set the context window (`contextLength`, default 32k). Ollama's own default is too small for TraceQA's tools and page snapshots.
+  - Settings → AI agent → Check connection lists the installed models and marks which support tools.
+- **LM Studio:** start the server in LM Studio's Developer tab (or `lms server start`), and load the model with a context length of 32k or more. LM Studio loads a downloaded model on first use.
+- **Choosing a model:** pick one with tool calling (Qwen, Llama 3.1+ and Mistral have native support). Small models often lose track in long multi-step tasks; larger models do better.
+- **Errors:** Ollama or LM Studio not running, a model not pulled, and a model without tool support each give a plain message.
 
 ## Healing
 
@@ -169,12 +248,12 @@ Everything the CLI does can be done here, except starting the MCP server:
 | Overview | Next step with its button, a button per pipeline step, coverage report |
 | Requirements | Create, edit, upload, trash requirement files with a live check; import; map; clarify |
 | App map | Analyze or re-analyze |
-| Explorer | AI exploration with live screenshots |
-| Framework | Create or refresh the framework, re-render, run or remove single tests |
-| Runs & heals | Run by requirement, title or browser; heal, or preview and apply or reject each fix |
+| Explorer | Each session as a step-by-step timeline with screenshots (click to enlarge and page through), problems marked at the step where they were found, console errors and failed requests |
+| Tests | Two views. **By requirement:** each test with the criterion it proves, its steps (actions and checks), latest result and failure reason, and the spec file with the test's own code highlighted. **All tests:** every test in the framework in one list, including Playwright tests written by hand, whether or not they are linked to a requirement, filtered by result and by link, and searchable. Run or remove single tests |
+| Runs & heals | Results filtered by outcome and searchable; each failure explains its verdict and shows the error and screenshots; run by requirement, title or browser; heal, or preview and apply or reject each fix |
 | Bugs | Edit, approve, discard, reopen, file in Jira |
 | AI agent | Explore, write tests, or any task in plain words |
-| Jobs | Full live output, token use and approximate cost, Stop |
+| Jobs | Live progress for AI jobs (phase, current action, counts, activity timeline, latest screenshot), the agent's summary with linked IDs, full technical log, token use and approximate cost, Stop |
 | Settings | App address, browsers, sign-in, safety rules, AI provider (Anthropic or OpenRouter) with model, effort, key and privacy, Jira, connect AI coding tools |
 
 How it works:
@@ -188,7 +267,7 @@ How it works:
 
 ## MCP tools
 
-`status`, `analyze_app`, `import_requirements`, `clarify_requirement`, `map_requirements`, `get_requirement`, `get_page`, `explore_start`, `explore_action`, `explore_snapshot`, `explore_record_finding`, `explore_end`, `scaffold_framework`, `save_test`, `list_tests`, `remove_test`, `run_tests`, `heal_tests`, `review_heal`, `list_bugs`, `get_bug`, `update_bug`, `file_bug`, `report`. Prompts: `test_requirement`, `triage_failures`.
+`status`, `analyze_app`, `import_requirements`, `import_requirement_document`, `read_requirement_document`, `save_document_reading`, `import_jira_requirements`, `clarify_requirement`, `map_requirements`, `get_requirement`, `get_page`, `explore_start`, `explore_action`, `explore_snapshot`, `explore_record_finding`, `explore_end`, `save_discovered_flow`, `scaffold_framework`, `save_test`, `list_tests`, `remove_test`, `run_tests`, `heal_tests`, `review_heal`, `list_bugs`, `get_bug`, `update_bug`, `file_bug`, `report`. Prompts: `test_requirement`, `triage_failures`.
 
 Tools are defined once in `src/tools/registry.ts`, and the MCP server and the CLI agent both use that list. Tests are saved as structured steps, and TraceQA renders the code from fixed templates, so the framework looks the same whichever AI wrote the test.
 
@@ -198,13 +277,14 @@ Tools are defined once in `src/tools/registry.ts`, and the MCP server and the CL
 your-project/
 ├── traceqa.config.json     base URL, browsers, auth, safety rules, ai, jira
 ├── .env                    test account, API keys (never commit)
-├── requirements/*.md       REQ-… headings with AC bullets
+├── requirements/           your documents in any format (.md, .txt, .docx, .pdf); jira/ (synced), discovered-flows.md
 ├── e2e/                    the generated Playwright framework (commit this)
 ├── TraceQA Dashboard.cmd / .command   double-click to open the dashboard
 └── .traceqa/
-    ├── app-map.json, requirements.json, traceability.json, tests.json   (commit)
+    ├── app-map.json, requirements.json, requirement-ids.json, traceability.json, tests.json   (commit)
+    ├── readings/                                                         AI readings of documents (commit)
     ├── bugs/, heals/
-    ├── sessions/, runs/, evidence/, report/, jobs/, trash/               (git-ignored)
+    ├── sessions/, runs/, evidence/, report/, jobs/, trash/, doc-cache/   (git-ignored)
 ```
 
 ## Try it on the Demo Store

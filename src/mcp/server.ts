@@ -13,7 +13,7 @@ export async function startMcpServer(projectDir?: string): Promise<void> {
   console.log = (...args: unknown[]) => console.error(...args);
 
   const server = new McpServer(
-    { name: 'traceqa', version: '0.3.0' },
+    { name: 'traceqa', version: '0.5.0' },
     { instructions: `TraceQA tests a web app against its written requirements and keeps a Playwright framework in sync.\n\n${AGENT_GUIDE}` },
   );
 

@@ -5,13 +5,17 @@ import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { activeModel, CONFIG_FILE, findProjectDir, loadProject, type Project } from '../core/config.js';
 import { listOpenRouterModels } from '../ai/openrouter.js';
+import { listLmStudioModels, listOllamaModels } from '../ai/local.js';
+import { readDocumentWithAI } from '../ai/read.js';
+import { importDocument, MAX_DOCUMENT_BYTES } from '../core/documents.js';
 import { loadAppMap } from '../core/appMap.js';
 import {
-  clarify, importRequirements, listRequirementFiles, loadRequirements, openIssues, previewRequirements,
+  clarify, deleteReading, EDITABLE_EXTS, fileOrigin, importRequirements, listRequirementFiles, loadRequirements, openIssues, previewRequirements,
   readRequirementFile, resolveRequirementFile, trashRequirementFile, writeRequirementFile,
 } from '../core/requirements.js';
 import { loadTraceability, mapRequirements } from '../core/mapper.js';
 import { describeStep, loadTests, removeTest, renderAll, specFileFor } from '../core/testgen.js';
+import { listAllTests, testRanges } from '../core/testlist.js';
 import { listRuns } from '../core/runner.js';
 import { bugMarkdown, getBug, listBugs, setBugStatus, updateBug, type BugEdit } from '../core/bugs.js';
 import { computeCoverage, coverageSummary, latestResults } from '../core/coverage.js';
@@ -24,7 +28,9 @@ import { aiKeyStatus, getSettings, saveSettings } from '../core/settings.js';
 import { ExploreSession } from '../core/explorer.js';
 import { rel } from '../core/store.js';
 import { buildTools } from '../tools/registry.js';
-import { EXPLORE_TOOLS, generateTargets, runAgent, tasks } from '../ai/agent.js';
+import { AUTOMATE_TOOLS, EXPLORE_TOOLS, generateTargets, parseMaxFlows, runAgent, tasks } from '../ai/agent.js';
+import { ProgressTracker, type ProgressPlan } from '../ai/progress.js';
+import { StoppedError } from '../core/proc.js';
 import { formatUsage } from '../ai/pricing.js';
 import { JobManager, summarize, type JobContext, type JobRecord } from './jobs.js';
 
@@ -32,7 +38,7 @@ import { JobManager, summarize, type JobContext, type JobRecord } from './jobs.j
 // (except starting the MCP server) can be done here. Binds to 127.0.0.1 only; requests must carry a
 // local Host header, and changes need the X-TraceQA header and a same-origin Origin.
 
-const VERSION = '0.3.0';
+const VERSION = '0.5.0';
 
 const CONTENT_TYPES: Record<string, string> = {
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webm': 'video/webm', '.zip': 'application/zip',
@@ -40,7 +46,7 @@ const CONTENT_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8', '.ts': 'text/plain; charset=utf-8', '.xml': 'text/plain; charset=utf-8',
 };
 
-const AI_KINDS = new Set(['explore', 'generate', 'agent', 'heal-ai']);
+const AI_KINDS = new Set(['explore', 'explore-app', 'generate', 'agent', 'heal-ai', 'read-doc']);
 
 function uiFile(): string {
   const here = path.dirname(fileURLToPath(import.meta.url));
@@ -89,9 +95,11 @@ export async function startDashboard(
 
   // Live exploration: the AI job that is exploring gets the session id, and pages get each new step.
   let liveJob: JobContext | undefined;
+  let liveTracker: ProgressTracker | undefined;
   const previousHook = ExploreSession.onEvent;
   ExploreSession.onEvent = (type, s) => {
     if (type === 'start') liveJob?.setSession(s.id);
+    liveTracker?.session(s);
     broadcast('session', { type, id: s.id, steps: s.steps.length });
   };
 
@@ -107,19 +115,28 @@ export async function startDashboard(
     return String(await tool.run(z.object(tool.inputSchema).parse(args)));
   }
 
-  async function aiWork(ctx: JobContext, task: string, allowTools?: string[]): Promise<string> {
+  /** Runs the AI agent for a job, with live progress (phase, current action, counts, timeline). */
+  async function aiWork(ctx: JobContext, task: string, allowTools: string[] | undefined, plan: ProgressPlan, flowTarget?: number | null): Promise<string> {
     const project = load();
+    const tracker = new ProgressTracker(plan, ctx.setProgress, { flowTarget, resolveRef: (ref) => ExploreSession.active?.refLabel(ref) });
     liveJob = ctx;
+    liveTracker = tracker;
     try {
-      ctx.log(`AI agent (${activeModel(project.config.ai).label}, effort ${project.config.ai.effort}, up to ${project.config.ai.maxTurns} turns) working …`);
-      const r = await runAgent(project, { task, allowTools, log: ctx.log, signal: ctx.signal, onUsage: ctx.setUsage });
+      const am = activeModel(project.config.ai);
+      ctx.log(`AI agent (${am.label}${am.local ? ", on this computer" : `, effort ${project.config.ai.effort}`}, up to ${project.config.ai.maxTurns} turns) working …`);
+      const r = await runAgent(project, { task, allowTools, log: ctx.log, signal: ctx.signal, onUsage: ctx.setUsage, onEvent: tracker.handle });
       ctx.setUsage(r.usage);
       const tail = `${r.turns} turns · ${r.toolCalls} tool calls · ${formatUsage(r.usage)}`;
       if (r.stopReason === 'refusal') throw new Error(`The model declined this request.\n${r.finalText}\n${tail}`);
       if (r.stopReason === 'max_turns') throw new Error(`${r.finalText}\n${tail}`);
+      tracker.finish('done');
       return `${r.finalText}\n\n${tail}`;
+    } catch (err) {
+      tracker.finish(err instanceof StoppedError || ctx.signal.aborted ? 'stopped' : 'failed', err instanceof Error ? err.message : String(err));
+      throw err;
     } finally {
       liveJob = undefined;
+      liveTracker = undefined;
     }
   }
 
@@ -131,17 +148,18 @@ export async function startDashboard(
 
   function startJob(body: Record<string, unknown>): JobRecord {
     const kind = String(body.kind ?? '');
-    if (AI_KINDS.has(kind) || (kind === 'heal' && body.ai === true)) {
-      if (body.confirmed !== true) throw httpError(400, 'AI jobs are billed to your Anthropic account; confirm them first.');
-    }
     const project = load();
+    // AI jobs on a paid provider need an explicit confirm; local models (Ollama, LM Studio) cost nothing.
+    if ((AI_KINDS.has(kind) || (kind === 'heal' && body.ai === true)) && !activeModel(project.config.ai).local && body.confirmed !== true) {
+      throw httpError(400, `AI jobs are billed to your ${activeModel(project.config.ai).providerLabel} account; confirm them first.`);
+    }
     const params = { ...body };
     delete params.confirmed;
     switch (kind) {
       case 'run': {
         const args = { requirementId: str(body.requirementId), testId: str(body.testId), grep: str(body.grep), browser: str(body.browser) };
         if (args.browser && !project.config.browsers.includes(args.browser as never)) throw httpError(400, `${args.browser} is not one of the configured browsers.`);
-        const label = args.testId ? `Run test ${args.testId}` : args.requirementId ? `Run ${args.requirementId} tests` : args.grep ? `Run tests matching "${args.grep}"` : 'Run all tests';
+        const label = args.testId ? `Run test ${args.testId}` : args.requirementId ? `Run ${args.requirementId} tests` : args.grep ? (str(body.title) ? `Run "${str(body.title)}"` : `Run tests matching "${args.grep}"`) : 'Run all tests';
         return jobs.enqueue('run', `${label}${args.browser ? ` (${args.browser})` : ''}`, { params }, (ctx) => runTool('run_tests', args, ctx));
       }
       case 'heal': {
@@ -158,7 +176,7 @@ export async function startDashboard(
           const left = result.records.filter((r) => r.status === 'failed').map((r) => r.testId);
           if (!ai || !left.length) return out + (left.length ? `\n${left.length} test(s) need a person or the AI agent.` : '');
           ctx.log(out);
-          return aiWork(ctx, tasks.heal(left));
+          return aiWork(ctx, tasks.heal(left), undefined, 'heal');
         });
       }
       case 'review-heal': {
@@ -181,7 +199,7 @@ export async function startDashboard(
         const id = str(body.requirementId)?.toUpperCase();
         if (!id || !loadRequirements(project).some((r) => r.id === id)) throw httpError(400, `Unknown requirement ${id ?? ''}.`);
         const task = tasks.explore(id, str(body.charter)) + (body.headed === true ? ' Call explore_start with headed: true so the user can watch.' : '');
-        return jobs.enqueue('explore', `Explore ${id} with AI`, { ai: true, params }, (ctx) => aiWork(ctx, task, EXPLORE_TOOLS));
+        return jobs.enqueue('explore', `Explore ${id} with AI`, { ai: true, params }, (ctx) => aiWork(ctx, task, EXPLORE_TOOLS, 'explore'));
       }
       case 'generate': {
         const ids = generateTargets(project, {
@@ -190,13 +208,53 @@ export async function startDashboard(
           all: body.all === true,
         });
         const label = body.all === true ? 'Write tests for every requirement' : body.gaps === true ? `Write tests for ${ids.length} gap(s)` : `Write tests for ${ids.join(', ')}`;
-        return jobs.enqueue('generate', label, { ai: true, params: { ...params, resolved: ids } }, (ctx) => aiWork(ctx, tasks.generate(ids)));
+        return jobs.enqueue('generate', label, { ai: true, params: { ...params, resolved: ids } }, (ctx) => aiWork(ctx, tasks.generate(ids), undefined, 'generate'));
       }
       case 'agent': {
         const task = str(body.task);
         if (!task) throw httpError(400, 'Describe the task for the agent.');
         if (task.length > 4000) throw httpError(400, 'Keep the task under 4000 characters.');
-        return jobs.enqueue('agent', `AI task: ${task.length > 60 ? `${task.slice(0, 59)}…` : task}`, { ai: true, params }, (ctx) => aiWork(ctx, task));
+        return jobs.enqueue('agent', `AI task: ${task.length > 60 ? `${task.slice(0, 59)}…` : task}`, { ai: true, params }, (ctx) => aiWork(ctx, task, undefined, 'agent'));
+      }
+      case 'explore-app': {
+        const area = str(body.area);
+        if (area && !area.startsWith('/')) throw httpError(400, 'The area is a path in the app, such as /cart.');
+        const writeTests = body.writeTests === true;
+        // Empty means no limit: every working flow the exploration finds.
+        const maxFlows = writeTests ? parseMaxFlows(body.maxFlows) : undefined;
+        const task = tasks.exploreApp({ area, charter: str(body.charter), signIn: body.signIn === true, headed: body.headed === true, writeTests, maxFlows });
+        const where = area && area !== '/' ? ` from ${area}` : '';
+        const label = writeTests ? `Explore the app${where} and automate ${maxFlows ? `up to ${maxFlows} flow${maxFlows === 1 ? '' : 's'}` : 'every flow found'}` : `Explore the app${where}`;
+        return jobs.enqueue('explore-app', label, { ai: true, params }, (ctx) =>
+          aiWork(ctx, task, writeTests ? AUTOMATE_TOOLS : EXPLORE_TOOLS, writeTests ? 'explore-app-automate' : 'explore-app', writeTests ? (maxFlows ?? null) : undefined),
+        );
+      }
+      case 'read-doc': {
+        const file = str(body.file);
+        if (!file) throw httpError(400, 'file is required.');
+        if (!fs.existsSync(resolveRequirementFile(project, file, true))) throw httpError(404, `No requirement document ${file}.`);
+        return jobs.enqueue('read-doc', `Read ${file} with AI`, { ai: true, params }, async (ctx) => {
+          const p = load();
+          liveJob = ctx;
+          try {
+            const r = await readDocumentWithAI(p, file, { signal: ctx.signal, log: ctx.log });
+            ctx.setUsage(r.usage);
+            return `Read ${r.file}: ${r.requirements} requirement(s) with ${r.criteria} acceptance criteria (${r.ids.join(', ')}).${r.truncated ? ' Only the first part of a long document was read.' : ''} The document itself is unchanged. · ${formatUsage(r.usage)}`;
+          } finally {
+            liveJob = undefined;
+          }
+        });
+      }
+      case 'jira-import': {
+        if (!project.config.jira) throw httpError(400, 'Set up Jira under Settings → Jira first.');
+        const jql = str(body.jql);
+        const max = typeof body.max === 'number' ? body.max : undefined;
+        return jobs.enqueue('jira-import', 'Import requirements from Jira', { params }, async (ctx) => {
+          const out = await runTool('import_jira_requirements', { ...(jql ? { jql } : {}), ...(max ? { max } : {}) }, ctx);
+          const p = load();
+          if (loadAppMap(p).pages.length) mapRequirements(p);
+          return out;
+        });
       }
       default:
         throw httpError(400, `Unknown job kind "${kind}".`);
@@ -208,8 +266,16 @@ export async function startDashboard(
   function state() {
     if (!isReady()) return { ready: false, dir: rootDir, version: VERSION };
     const project = load();
-    const aiJobs = jobs.list().filter((j) => j.ai && j.usage && j.status !== 'queued').slice(0, 5);
+    const all = jobs.list();
+    const aiJobs = all.filter((j) => j.ai && j.usage && j.status !== 'queued').slice(0, 5);
     return {
+      // Small numbers for the navigation badges.
+      counts: {
+        draftBugs: listBugs(project, 'draft').length,
+        proposedHeals: listHeals(project).filter((h) => h.status === 'proposed').length,
+        unclearRequirements: loadRequirements(project).filter((r) => openIssues(r).some((i) => i.kind === 'vague' || i.kind === 'no-criteria')).length,
+        activeJobs: all.filter((j) => j.status === 'running' || j.status === 'queued').length,
+      },
       ready: true,
       dir: rootDir,
       version: VERSION,
@@ -217,9 +283,11 @@ export async function startDashboard(
       baseUrl: project.config.baseUrl,
       browsers: project.config.browsers,
       jiraConfigured: !!project.config.jira,
+      authConfigured: !!project.config.auth,
       ai: {
         ...aiKeyStatus(project),
         provider: project.config.ai.provider,
+        providerLabel: activeModel(project.config.ai).providerLabel,
         model: activeModel(project.config.ai).model,
         effort: project.config.ai.effort,
         maxTurns: project.config.ai.maxTurns,
@@ -295,9 +363,13 @@ export async function startDashboard(
     const link = loadTraceability(project).links.find((l) => l.requirementId === req.id);
     const spec = specFileFor(project, req);
     const reqRoot = rel(project.dir, project.paths.requirementsDir);
+    const sourceFile = req.source.file.startsWith(`${reqRoot}/`) ? req.source.file.slice(reqRoot.length + 1) : req.source.file;
+    const fromJira = sourceFile.startsWith('jira/') && project.config.jira;
     return {
       requirement: req,
-      sourceFile: req.source.file.startsWith(`${reqRoot}/`) ? req.source.file.slice(reqRoot.length + 1) : req.source.file,
+      sourceFile,
+      origin: EDITABLE_EXTS.includes(path.extname(sourceFile).toLowerCase()) && fs.existsSync(path.join(project.paths.requirementsDir, sourceFile)) ? fileOrigin(sourceFile, fs.readFileSync(path.join(project.paths.requirementsDir, sourceFile), 'utf8').slice(0, 300)).origin : 'written',
+      jiraUrl: fromJira ? `${project.config.jira!.baseUrl.replace(/\/+$/, '')}/browse/${req.id}` : null,
       coverage: cov,
       pages: (link?.pages ?? []).map((p) => ({ ...p, page: map.pages.find((x) => x.id === p.pageId)?.templatePath })),
       tests: loadTests(project)
@@ -328,38 +400,52 @@ export async function startDashboard(
     return saved;
   }
 
+  /**
+   * Tests two ways: grouped by requirement (every test linked to one, whoever wrote it), and one flat list of
+   * every test in the framework, including hand-written tests that are not linked to any requirement.
+   */
   function testsView(project: Project) {
     const reqs = loadRequirements(project);
-    const results = latestResults(project);
-    const tests = loadTests(project);
+    const defs = new Map(loadTests(project).map((t) => [t.id, t]));
+    const all = listAllTests(project);
     return {
       framework: rel(project.dir, project.paths.e2e),
       installed: hasInstalledDeps(project),
       exists: fs.existsSync(path.join(project.paths.e2e, 'playwright.config.ts')),
+      all,
+      unlinked: all.filter((t) => !t.linked).length,
+      handWritten: all.filter((t) => t.source === 'hand-written').length,
       groups: reqs
         .map((r) => ({
           requirementId: r.id,
           title: r.title,
           feature: r.feature,
-          tests: tests
-            .filter((t) => t.requirementId === r.id)
+          tests: all
+            .filter((t) => t.linked && t.requirementId === r.id)
             .map((t) => {
-              const latest = results.find((x) => x.testDefId === t.id);
-              return { id: t.id, acId: t.acId, title: t.title, signedIn: t.signedIn, last: t.lastVerification, latest: latest ? { status: latest.status, verdict: latest.verdict } : null, steps: t.steps.map(describeStep) };
+              const def = t.id ? defs.get(t.id) : undefined;
+              return {
+                ...t,
+                // The title without the criterion prefix; the criterion is shown as a tag.
+                title: def ? def.title : t.title,
+                last: def?.lastVerification,
+                updatedAt: def?.updatedAt,
+                latest: t.latest ?? null,
+              };
             }),
         }))
         .filter((g) => g.tests.length),
     };
   }
 
-  function reimport(project: Project) {
-    const r = importRequirements(project);
+  async function reimport(project: Project) {
+    const r = await importRequirements(project);
     let mapped = false;
     if (loadAppMap(project).pages.length) {
       mapRequirements(project);
       mapped = true;
     }
-    return { imported: r.file.requirements.length, files: r.files.length, duplicates: r.duplicates, mapped };
+    return { imported: r.file.requirements.length, files: r.files.length, duplicates: r.duplicates, mapped, documents: r.documents };
   }
 
   // ---------- HTTP ----------
@@ -369,6 +455,18 @@ export async function startDashboard(
     res.writeHead(status, { ...baseHeaders, 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
     res.end(JSON.stringify(body));
   };
+
+  async function readRaw(req: http.IncomingMessage, limit: number): Promise<Buffer> {
+    let size = 0;
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) {
+      size += chunk.length;
+      if (size > limit) throw httpError(413, `Files are limited to ${Math.round(limit / 1024 / 1024)} MB.`);
+      chunks.push(chunk);
+    }
+    if (!size) throw httpError(400, 'The file is empty.');
+    return Buffer.concat(chunks);
+  }
 
   async function readBody(req: http.IncomingMessage): Promise<Record<string, unknown>> {
     let size = 0;
@@ -388,7 +486,7 @@ export async function startDashboard(
     }
   }
 
-  async function handleGet(parts: string[], url: URL, res: http.ServerResponse) {
+  async function handleGet(parts: string[], url: URL, res: http.ServerResponse, req: http.IncomingMessage) {
     if (parts[1] === 'state') return send(res, 200, state());
     const project = load();
     switch (parts[1]) {
@@ -405,7 +503,13 @@ export async function startDashboard(
       case 'requirement-files':
         if (parts[2] === 'content') {
           const file = url.searchParams.get('file') ?? '';
-          return send(res, 200, { file, content: readRequirementFile(project, file) });
+          const abs = resolveRequirementFile(project, file, true);
+          if (!fs.existsSync(abs)) throw httpError(404, `No requirement document ${file}.`);
+          const doc = listRequirementFiles(project).find((d) => d.file === file);
+          const reqs = loadRequirements(project).filter((r) => path.resolve(project.dir, r.source.file) === abs);
+          if (!EDITABLE_EXTS.includes(path.extname(file).toLowerCase())) return send(res, 200, { file, binary: true, document: doc, requirements: reqs });
+          const content = fs.readFileSync(abs, 'utf8');
+          return send(res, 200, { file, content, ...fileOrigin(file, content), document: doc, requirements: reqs });
         }
         return send(res, 200, { dir: rel(project.dir, project.paths.requirementsDir), files: listRequirementFiles(project) });
       case 'appmap': {
@@ -424,7 +528,8 @@ export async function startDashboard(
         const r = loadRequirements(project).find((x) => x.id === (url.searchParams.get('req') ?? '').toUpperCase());
         if (!r) return send(res, 404, { error: 'Unknown requirement' });
         const file = specFileFor(project, r);
-        return send(res, 200, { file: rel(project.dir, file), code: fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null });
+        const code = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
+        return send(res, 200, { file: rel(project.dir, file), code, tests: code ? testRanges(code, loadTests(project).filter((t) => t.requirementId === r.id)) : [] });
       }
       case 'runs': {
         const runs = listRuns(project);
@@ -460,25 +565,40 @@ export async function startDashboard(
         }
         return send(res, 200, { bugs: listBugs(project).reverse() });
       }
-      case 'sessions':
+      case 'sessions': {
+        if (parts[2]) {
+          const one = sessions(project).find((s) => s.id === parts[2].toUpperCase());
+          return one ? send(res, 200, { session: one }) : send(res, 404, { error: `No session ${parts[2]}` });
+        }
         return send(res, 200, { sessions: sessions(project) });
+      }
       case 'jobs': {
         if (parts[2]) {
           const job = jobs.get(parts[2]);
           if (!job) return send(res, 404, { error: `No job ${parts[2]}` });
-          return send(res, 200, { job: { ...summarize(job), log: job.log } });
+          return send(res, 200, { job: { ...summarize(job), log: job.log, progress: job.progress } });
         }
         return send(res, 200, { jobs: jobs.list() });
       }
       case 'settings':
         return send(res, 200, getSettings(project));
-      case 'openrouter-models': {
-        // OpenRouter's public model list (no key needed), cached for an hour, for the model picker.
-        const base = project.config.ai.openrouter.baseUrl;
+      case 'openrouter-models':
+      case 'ai-models': {
+        // This makes the server contact another address, so only the dashboard page itself may ask (custom header = no cross-site use).
+        if (req.headers['x-traceqa'] !== '1') return send(res, 403, { error: 'Forbidden' });
+        // Model pickers. OpenRouter: its public list (no key needed), cached for an hour.
+        // Ollama and LM Studio: what is installed on this computer right now (also a connection check).
+        const provider = parts[1] === 'openrouter-models' ? 'openrouter' : url.searchParams.get('provider') ?? project.config.ai.provider;
+        const ai = project.config.ai;
+        const base = url.searchParams.get('baseUrl') || (provider === 'ollama' ? ai.ollama.baseUrl : provider === 'lmstudio' ? ai.lmstudio.baseUrl : ai.openrouter.baseUrl);
+        if (!/^https?:\/\//.test(base)) throw httpError(400, 'The address must start with http:// or https://');
+        if (provider === 'ollama') return send(res, 200, { provider, models: await listOllamaModels(base) });
+        if (provider === 'lmstudio') return send(res, 200, { provider, models: await listLmStudioModels(base, project.env.LMSTUDIO_API_KEY ?? '') });
+        if (provider !== 'openrouter') return send(res, 200, { provider, models: [] });
         if (!orModels || orModels.base !== base || Date.now() - orModels.at > 3_600_000) {
           orModels = { base, at: Date.now(), models: await listOpenRouterModels(base) };
         }
-        return send(res, 200, { models: orModels.models });
+        return send(res, 200, { provider, models: orModels.models });
       }
       case 'report': {
         const file = path.join(project.paths.report, 'index.html');
@@ -543,17 +663,24 @@ export async function startDashboard(
         const old = resolveRequirementFile(project, previous);
         if (fs.existsSync(old)) fs.rmSync(old); // renamed: the content now lives in the new file
       }
-      return send(res, 200, { ...w, ...reimport(project) });
+      return send(res, 200, { ...w, ...(await reimport(project)) });
     }
     if (a === 'requirement-files' && b === 'delete') {
       const trashed = trashRequirementFile(project, str(body.file) ?? '');
-      return send(res, 200, { trashed, ...reimport(project) });
+      return send(res, 200, { trashed, ...(await reimport(project)) });
+    }
+    if (a === 'requirement-files' && b === 'forget-reading') {
+      // Back to TraceQA's own reading of the document (the AI reading is discarded).
+      const file = str(body.file) ?? '';
+      resolveRequirementFile(project, file, true);
+      deleteReading(project, file);
+      return send(res, 200, await reimport(project));
     }
     if (a === 'requirements' && b === 'preview') {
       if (typeof body.content !== 'string') throw httpError(400, 'content is required.');
-      return send(res, 200, { requirements: previewRequirements(body.content, str(body.file) ?? 'new.md') });
+      return send(res, 200, await previewRequirements(project, body.content, str(body.file) ?? 'new.md'));
     }
-    if (a === 'requirements' && b === 'import') return send(res, 200, reimport(project));
+    if (a === 'requirements' && b === 'import') return send(res, 200, await reimport(project));
     if (a === 'requirements' && b && c === 'clarify') {
       if (typeof body.acId !== 'string' || typeof body.text !== 'string' || !body.text.trim()) throw httpError(400, 'acId and text are required');
       return send(res, 200, { criterion: clarify(project, b, body.acId, body.text.trim()) });
@@ -640,10 +767,18 @@ export async function startDashboard(
         return fs.createReadStream(target).pipe(res);
       }
       if (parts[0] !== 'api') return send(res, 404, { error: 'Not found' });
-      if (req.method === 'GET') return await handleGet(parts, url, res);
+      if (req.method === 'GET') return await handleGet(parts, url, res, req);
       if (req.method === 'POST') {
         const origin = req.headers.origin;
         if (req.headers['x-traceqa'] !== '1' || (origin && !localOrigins.has(origin))) return send(res, 403, { error: 'Forbidden' });
+        if (parts[1] === 'requirement-docs') {
+          // A document upload: the raw file is the body, its name is in ?name=.
+          const project = load();
+          const name = url.searchParams.get('name') ?? '';
+          const r = await importDocument(project, name, await readRaw(req, MAX_DOCUMENT_BYTES));
+          if (loadAppMap(project).pages.length) mapRequirements(project);
+          return send(res, 200, r);
+        }
         return await handlePost(parts, await readBody(req), res);
       }
       return send(res, 405, { error: 'Method not allowed' });

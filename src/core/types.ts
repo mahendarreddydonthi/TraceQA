@@ -61,7 +61,13 @@ export interface Requirement {
   description: string;
   criteria: AcceptanceCriterion[];
   issues: RequirementIssue[];
-  source: { file: string; line: number };
+  /**
+   * line is 0 for Word, PDF and AI readings; section is the heading path in free-form documents.
+   * mode: how it was read (ids = "## REQ-142" headings, free-form = any format, ai = an AI reading).
+   */
+  source: { file: string; line: number; section?: string; mode?: 'ids' | 'free-form' | 'ai' };
+  /** The document gave no ID; TraceQA assigned a stable one. */
+  autoId?: boolean;
 }
 
 export interface RequirementsFile {

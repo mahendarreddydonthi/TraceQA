@@ -1,7 +1,8 @@
 #!/usr/bin/env node
+import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { Command } from 'commander';
+import { Command, InvalidArgumentError } from 'commander';
 import { activeModel, loadProject } from './core/config.js';
 import { analyzeApp } from './core/appMap.js';
 import { clarify, importRequirements, openIssues } from './core/requirements.js';
@@ -18,14 +19,19 @@ import { latestResults } from './core/coverage.js';
 import { loadRequirements } from './core/requirements.js';
 import { formatHeals, healTests, reviewHeal } from './core/heal.js';
 import { fileBugInJira } from './core/jira.js';
-import { EXPLORE_TOOLS, generateTargets, runAgent, tasks } from './ai/agent.js';
+import { AUTOMATE_TOOLS, EXPLORE_TOOLS, generateTargets, parseMaxFlows, runAgent, tasks } from './ai/agent.js';
+import { ProgressTracker, type ProgressPlan } from './ai/progress.js';
+import { readDocumentWithAI } from './ai/read.js';
+import { importDocument } from './core/documents.js';
+import { importJiraRequirements } from './core/jira-import.js';
 import { formatUsage } from './ai/pricing.js';
 import { startMcpServer } from './mcp/server.js';
 import { startDashboard } from './ui/server.js';
 import type { Project } from './core/config.js';
 
-async function agentRun(p: Project, task: string, allowTools?: string[]): Promise<void> {
-  console.log(`AI agent (${activeModel(p.config.ai).label}, effort ${p.config.ai.effort}) working …`);
+async function agentRun(p: Project, task: string, allowTools?: string[], plan: ProgressPlan = 'agent', flowTarget?: number | null): Promise<void> {
+  const am = activeModel(p.config.ai);
+  console.log(`AI agent (${am.label}${am.local ? ", on this computer" : `, effort ${p.config.ai.effort}`}) working …`);
   // Ctrl+C stops the run cleanly (closes any exploration browser) instead of killing it mid-step.
   const controller = new AbortController();
   const onSigint = () => {
@@ -34,7 +40,16 @@ async function agentRun(p: Project, task: string, allowTools?: string[]): Promis
   };
   process.once('SIGINT', onSigint);
   try {
-    const r = await runAgent(p, { task, allowTools, log: (l) => console.log(l), signal: controller.signal });
+    // Print a heading whenever the agent moves to a new phase (exploring, automating, running tests …).
+    let shown: string | undefined;
+    const tracker = new ProgressTracker(plan, (pr) => {
+      if (pr.phase && pr.phase !== shown && !pr.done) {
+        shown = pr.phase;
+        console.log(`
+== ${pr.phases.find((x) => x.key === pr.phase)?.label} ==`);
+      }
+    }, { flowTarget });
+    const r = await runAgent(p, { task, allowTools, log: (l) => console.log(l), signal: controller.signal, onEvent: tracker.handle });
     console.log(`\n${r.finalText}\n\n(${r.turns} turns, ${r.toolCalls} tool calls, stop: ${r.stopReason}; ${formatUsage(r.usage)})`);
     if (r.stopReason === 'refusal' || r.stopReason === 'max_turns') process.exitCode = 1;
   } finally {
@@ -46,7 +61,7 @@ const program = new Command();
 program
   .name('traceqa')
   .description('Requirement-driven testing agent: maps requirements to your app, explores it, and keeps a Playwright framework in sync.')
-  .version('0.3.0')
+  .version('0.5.0')
   .option('--project <dir>', 'project folder (default: nearest folder with traceqa.config.json)');
 
 const project = () => loadProject(program.opts().project);
@@ -102,19 +117,21 @@ program
     }),
   );
 
-const reqCmd = program.command('requirements').description('Import and clarify requirements');
+const reqCmd = program.command('requirements').description('Import, read and clarify requirements (any format: Markdown, text, Word, PDF, Jira)');
 reqCmd
   .command('import')
-  .description('Read the Markdown requirement files')
+  .description('Read every requirement document in the requirements folder, in whatever format it is written')
   .action(
-    action(() => {
-      const { file, files } = importRequirements(project());
-      console.log(`Imported ${file.requirements.length} requirements from ${files.length} files.`);
+    action(async () => {
+      const { file, documents, duplicates } = await importRequirements(project());
+      console.log(`Imported ${file.requirements.length} requirements from ${documents.length} document(s).`);
+      for (const d of documents) console.log(`  ${d.file} · ${d.type} · ${d.mode === 'ai' ? 'AI reading' : d.mode === 'ids' ? 'by IDs' : 'free-form'} · ${d.requirements} requirement(s), ${d.criteria} criteria${d.reading?.stale ? ' · changed since its AI reading' : ''}`);
       for (const r of file.requirements) {
         const issues = openIssues(r);
-        console.log(`  ${r.id.padEnd(9)} ${r.title}${issues.length ? `  ⚠ ${issues.length} issue(s)` : ''}`);
+        console.log(`  ${r.id.padEnd(9)} ${r.title}${r.autoId ? ' (ID assigned)' : ''}${issues.length ? `  ⚠ ${issues.length} issue(s)` : ''}`);
         for (const i of issues) console.log(`      ${i.acId ?? ''} ${i.message}`);
       }
+      if (duplicates.length) console.log(`Duplicate IDs ignored: ${duplicates.join(', ')}`);
     }),
   );
 reqCmd
@@ -124,6 +141,42 @@ reqCmd
     action((requirementId: string, acId: string, text: string[]) => {
       const ac = clarify(project(), requirementId, acId, text.join(' '));
       console.log(`${requirementId.toUpperCase()} ${ac.id}: ${ac.text}`);
+    }),
+  );
+
+async function aiRead(p: ReturnType<typeof project>, file: string): Promise<void> {
+  console.log(`Reading requirements/${file} with ${activeModel(p.config.ai).label} …`);
+  const c = await readDocumentWithAI(loadProject(p.dir), file, { log: (l: string) => console.log(`  ${l}`) });
+  console.log(`${c.requirements} requirement(s) with ${c.criteria} criteria: ${c.ids.join(', ')} · ${formatUsage(c.usage)}. The document itself is unchanged.`);
+}
+
+reqCmd
+  .command('import-doc <file>')
+  .description('Add a Word (.docx), PDF, text or Markdown document to the requirements folder as it is, and read it')
+  .option('--ai', 'also read it with the AI agent (billed unless the model is local)')
+  .action(
+    action(async (file: string, opts: { ai?: boolean }) => {
+      const p = project();
+      const r = await importDocument(p, path.basename(file), fs.readFileSync(path.resolve(file)));
+      console.log(`Added ${file} (${r.kind}) as requirements/${r.file}: ${r.requirements} requirement(s), ${r.criteria} acceptance criteria.`);
+      for (const w of r.warnings) console.log(`  ! ${w}`);
+      if (opts.ai) await aiRead(p, r.file);
+      else if (r.suggestAi) console.log(`Few requirements were found automatically. To read it with AI: traceqa requirements read-ai "${r.file}"`);
+    }),
+  );
+reqCmd
+  .command('read-ai <file>')
+  .description('Read a requirement document with the AI agent when the automatic reading misses things (the document is not changed)')
+  .action(action(async (file: string) => aiRead(project(), file)));
+reqCmd
+  .command('import-jira')
+  .description('Import Jira issues as requirements (the Jira key becomes the requirement ID)')
+  .option('--jql <query>', 'Jira query (default: open stories of the configured project, or jira.requirementsJql)')
+  .option('--max <n>', 'at most this many issues', (v) => Number(v), 200)
+  .action(
+    action(async (opts: { jql?: string; max: number }) => {
+      const r = await importJiraRequirements(project(), { jql: opts.jql, max: opts.max, log: (l) => console.log(l) });
+      console.log(`${r.issues} issue(s) → requirements/${r.file}, ${r.withCriteria} with acceptance criteria. Next: traceqa map`);
     }),
   );
 
@@ -174,7 +227,7 @@ program
       const p = project();
       if (!opts.req?.length && !opts.gaps && !opts.all) throw new Error('Name requirements with --req REQ-1 REQ-2, or use --gaps or --all.');
       const ids = generateTargets(p, { ids: opts.req, gaps: opts.gaps, all: opts.all });
-      await agentRun(p, tasks.generate(ids));
+      await agentRun(p, tasks.generate(ids), undefined, 'generate');
     }),
   );
 
@@ -263,17 +316,32 @@ program
 
 program
   .command('explore')
-  .description('AI: explore one requirement in a real browser and record findings as draft bugs. Needs an Anthropic API key.')
-  .requiredOption('--req <id>', 'requirement to explore, e.g. REQ-142')
+  .description('AI: explore the app in a real browser and record problems as draft bugs. With --req, one requirement; without, the whole app (no requirements needed).')
+  .option('--req <id>', 'requirement to explore, e.g. REQ-142')
+  .option('--area <path>', 'without --req: page to start from, e.g. /cart (default: the home page)')
   .option('--charter <text>', 'what to focus on')
+  .option('--sign-in', 'without --req: sign in with the test account first')
+  .option('--write-tests', 'without --req: also save the main working flows as E2E requirements and write tests for them')
+  .option('--max-flows <n>', 'with --write-tests: at most this many flows (default: every working flow it finds)', (v) => {
+    try {
+      return parseMaxFlows(v);
+    } catch (err) {
+      throw new InvalidArgumentError((err as Error).message);
+    }
+  })
   .option('--headed', 'show the browser window so you can watch')
   .action(
-    action(async (opts: { req: string; charter?: string; headed?: boolean }) => {
+    action(async (opts: { req?: string; area?: string; charter?: string; signIn?: boolean; writeTests?: boolean; maxFlows?: number; headed?: boolean }) => {
       const p = project();
+      if (!opts.req) {
+        const task = tasks.exploreApp({ area: opts.area, charter: opts.charter, signIn: opts.signIn, headed: opts.headed, writeTests: opts.writeTests, maxFlows: opts.maxFlows });
+        await agentRun(p, task, opts.writeTests ? AUTOMATE_TOOLS : EXPLORE_TOOLS, opts.writeTests ? 'explore-app-automate' : 'explore-app', opts.writeTests ? (opts.maxFlows ?? null) : undefined);
+        return;
+      }
       const id = opts.req.toUpperCase();
       if (!loadRequirements(p).some((r) => r.id === id)) throw new Error(`Unknown requirement ${id}. Run "traceqa requirements import" first.`);
       const task = tasks.explore(id, opts.charter) + (opts.headed ? ' Call explore_start with headed: true so the user can watch.' : '');
-      await agentRun(p, task, EXPLORE_TOOLS);
+      await agentRun(p, task, EXPLORE_TOOLS, 'explore');
     }),
   );
 
@@ -300,7 +368,7 @@ program
       const result = await healTests(p, { apply: !opts.dryRun, log: (l) => console.log(l) });
       console.log(formatHeals(result));
       const left = result.records.filter((r) => r.status === 'failed').map((r) => r.testId);
-      if (left.length && opts.ai && !opts.dryRun) await agentRun(p, tasks.heal(left));
+      if (left.length && opts.ai && !opts.dryRun) await agentRun(p, tasks.heal(left), undefined, 'heal');
       else if (left.length) console.log(`\n${left.length} test(s) need a person or the AI: traceqa heal --ai`);
     }),
   );

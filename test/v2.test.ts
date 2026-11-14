@@ -77,7 +77,7 @@ function message(content: unknown[], stop: string): Anthropic.Beta.BetaMessage {
 test('agent loop runs tools in order, rejects invalid input and hides human-only tools', async () => {
   const dir = tempProject();
   const project = loadProject(dir);
-  importRequirements(project);
+  await importRequirements(project);
   const offered: string[][] = [];
   const seenResults: unknown[] = [];
   const script = [

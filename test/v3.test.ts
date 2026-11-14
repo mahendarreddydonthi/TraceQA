@@ -58,15 +58,17 @@ test('settings are validated, keep secrets write-only, and allow the new host', 
   assert.equal(readEnvFile(path.join(dir, '.env')).ANTHROPIC_API_KEY, undefined);
 });
 
-test('requirement files stay inside the requirements folder and go to the trash, not away', () => {
+test('requirement files stay inside the requirements folder and go to the trash, not away', async () => {
   const dir = tempProject();
   const project = loadProject(dir);
-  for (const bad of ['../x.md', '/etc/x.md', 'C:/x.md', 'notes.txt', 'README.md', 'a/../../b.md', '']) {
+  for (const bad of ['../x.md', '/etc/x.md', 'C:/x.md', 'notes.docx', 'slides.pptx', 'README.md', 'a/../../b.md', '']) {
     assert.throws(() => resolveRequirementFile(project, bad), undefined, bad);
   }
+  assert.ok(resolveRequirementFile(project, 'notes.txt'), 'text files can be edited too');
+  assert.ok(resolveRequirementFile(project, 'spec.docx', true), 'Word and PDF are allowed as documents');
   assert.ok(resolveRequirementFile(project, 'checkout/coupons.md').endsWith(path.join('requirements', 'checkout', 'coupons.md')));
   writeRequirementFile(project, 'shop.md', '# Shop\n\n## REQ-1 Search\n- AC1: Results appear quickly\n');
-  const preview = previewRequirements(fs.readFileSync(path.join(dir, 'requirements', 'shop.md'), 'utf8'), 'shop.md');
+  const preview = (await previewRequirements(project, fs.readFileSync(path.join(dir, 'requirements', 'shop.md'), 'utf8'), 'shop.md')).requirements;
   assert.equal(preview[0].id, 'REQ-1');
   assert.equal(preview[0].criteria[0].issues[0].kind, 'vague');
   const trashed = trashRequirementFile(project, 'shop.md');

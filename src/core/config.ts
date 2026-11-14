@@ -10,6 +10,9 @@ export const OPENROUTER_DEFAULTS = {
   dataCollection: 'deny' as 'allow' | 'deny',
   zdr: false,
 };
+export const OLLAMA_DEFAULTS = { model: '', baseUrl: 'http://localhost:11434', contextLength: 32768 };
+export const LMSTUDIO_DEFAULTS = { model: '', baseUrl: 'http://localhost:1234/v1' };
+const PROVIDER_LABEL = { anthropic: 'Anthropic', openrouter: 'OpenRouter', ollama: 'Ollama', lmstudio: 'LM Studio' } as const;
 
 export const ConfigSchema = z.object({
   baseUrl: z.string().url(),
@@ -37,8 +40,11 @@ export const ConfigSchema = z.object({
     .default({ allowedHosts: [], blockedActions: [], maxPagesPerSession: 40, maxMinutesPerSession: 15 }),
   ai: z
     .object({
-      /** anthropic = Claude API with ANTHROPIC_API_KEY; openrouter = OpenRouter with OPENROUTER_API_KEY. */
-      provider: z.enum(['anthropic', 'openrouter']).default('anthropic'),
+      /**
+       * anthropic = Claude API (ANTHROPIC_API_KEY); openrouter = OpenRouter (OPENROUTER_API_KEY);
+       * ollama / lmstudio = a model running on this computer (no key, no cost).
+       */
+      provider: z.enum(['anthropic', 'openrouter', 'ollama', 'lmstudio']).default('anthropic'),
       /** Model on the Claude API. */
       model: z.string().min(1).default('claude-opus-5-5'),
       effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).default('high'),
@@ -54,8 +60,23 @@ export const ConfigSchema = z.object({
           zdr: z.boolean().default(OPENROUTER_DEFAULTS.zdr),
         })
         .default(OPENROUTER_DEFAULTS),
+      ollama: z
+        .object({
+          /** An installed model that supports tools, e.g. qwen3 or llama3.1. */
+          model: z.string().default(''),
+          baseUrl: z.string().url().default(OLLAMA_DEFAULTS.baseUrl),
+          /** Context window TraceQA asks Ollama for (num_ctx). Tools and page snapshots need about 32k. */
+          contextLength: z.number().int().min(2048).max(1_048_576).default(OLLAMA_DEFAULTS.contextLength),
+        })
+        .default(OLLAMA_DEFAULTS),
+      lmstudio: z
+        .object({
+          model: z.string().default(''),
+          baseUrl: z.string().url().default(LMSTUDIO_DEFAULTS.baseUrl),
+        })
+        .default(LMSTUDIO_DEFAULTS),
     })
-    .default({ provider: 'anthropic', model: 'claude-opus-5-5', effort: 'high', maxTurns: 60, openrouter: OPENROUTER_DEFAULTS }),
+    .default({ provider: 'anthropic', model: 'claude-opus-5-5', effort: 'high', maxTurns: 60, openrouter: OPENROUTER_DEFAULTS, ollama: OLLAMA_DEFAULTS, lmstudio: LMSTUDIO_DEFAULTS }),
   jira: z
     .object({
       baseUrl: z.string().url(),
@@ -65,6 +86,10 @@ export const ConfigSchema = z.object({
       emailEnv: z.string().default('JIRA_EMAIL'),
       tokenEnv: z.string().default('JIRA_API_TOKEN'),
       labels: z.array(z.string()).default(['traceqa']),
+      /** JQL for importing requirements from Jira; default: open stories of the project. */
+      requirementsJql: z.string().optional(),
+      /** Custom field holding acceptance criteria, e.g. customfield_10035; otherwise read from the description. */
+      acceptanceCriteriaField: z.string().regex(/^customfield_\d+$/, 'use the field id, e.g. customfield_10035').optional(),
     })
     .optional(),
   analyze: z
@@ -78,10 +103,12 @@ export const ConfigSchema = z.object({
 export type TraceQAConfig = z.infer<typeof ConfigSchema>;
 
 /** The model the AI agent will actually use, with its provider, for display and logs. */
-export function activeModel(ai: TraceQAConfig['ai']): { provider: 'anthropic' | 'openrouter'; model: string; keyName: string; label: string } {
-  return ai.provider === 'openrouter'
-    ? { provider: 'openrouter', model: ai.openrouter.model, keyName: 'OPENROUTER_API_KEY', label: `OpenRouter · ${ai.openrouter.model}` }
-    : { provider: 'anthropic', model: ai.model, keyName: 'ANTHROPIC_API_KEY', label: ai.model };
+export function activeModel(ai: TraceQAConfig['ai']): { provider: TraceQAConfig['ai']['provider']; providerLabel: string; model: string; keyName: string; local: boolean; label: string } {
+  const p = ai.provider;
+  const model = p === 'openrouter' ? ai.openrouter.model : p === 'ollama' ? ai.ollama.model : p === 'lmstudio' ? ai.lmstudio.model : ai.model;
+  const keyName = p === 'openrouter' ? 'OPENROUTER_API_KEY' : p === 'anthropic' ? 'ANTHROPIC_API_KEY' : p === 'lmstudio' ? 'LMSTUDIO_API_KEY' : '';
+  const local = p === 'ollama' || p === 'lmstudio';
+  return { provider: p, providerLabel: PROVIDER_LABEL[p], model, keyName, local, label: p === 'anthropic' ? model : `${PROVIDER_LABEL[p]} · ${model || '(no model chosen)'}` };
 }
 
 export interface Project {

@@ -3,6 +3,7 @@ import path from 'node:path';
 import { StoppedError } from '../core/proc.js';
 import { listJson, nextId, now, writeJson } from '../core/store.js';
 import type { Usage } from '../ai/pricing.js';
+import { progressLine, type JobProgress, type ProgressLine } from '../ai/progress.js';
 
 // Jobs started from the dashboard run one at a time (they share the browser, the test framework and the
 // project files). Each keeps its full output, can be stopped, and is saved under .traceqa/jobs/.
@@ -26,15 +27,18 @@ export interface JobRecord {
   /** Exploration session the job is driving, for the live screenshots. */
   sessionId?: string;
   params?: Record<string, unknown>;
+  /** Live progress of an AI job: phase, current activity, counts and timeline. */
+  progress?: JobProgress;
 }
 
-export type JobSummary = Omit<JobRecord, 'log'> & { lines: number; lastLine?: string };
+export type JobSummary = Omit<JobRecord, 'log' | 'progress'> & { lines: number; lastLine?: string; progress?: ProgressLine };
 
 export interface JobContext {
   signal: AbortSignal;
   log: (line: string) => void;
   setUsage: (usage: Usage) => void;
   setSession: (id: string) => void;
+  setProgress: (progress: JobProgress) => void;
 }
 
 export type JobWork = (ctx: JobContext) => Promise<string>;
@@ -42,8 +46,8 @@ export type JobWork = (ctx: JobContext) => Promise<string>;
 const MAX_LOG_LINES = 4000;
 
 export function summarize(job: JobRecord): JobSummary {
-  const { log, ...rest } = job;
-  return { ...rest, lines: log.length, lastLine: log[log.length - 1] };
+  const { log, progress, ...rest } = job;
+  return { ...rest, lines: log.length, lastLine: log[log.length - 1], progress: progressLine(progress) };
 }
 
 export class JobManager {
@@ -56,7 +60,7 @@ export class JobManager {
   /** dir() is the jobs folder, or undefined while the project is not set up yet. */
   constructor(
     private dir: () => string | undefined,
-    private emit: (event: 'job' | 'job-log', data: unknown) => void,
+    private emit: (event: 'job' | 'job-log' | 'job-progress', data: unknown) => void,
   ) {}
 
   /** Loads saved jobs once per project. Jobs left running by a dashboard that stopped are marked failed. */
@@ -162,6 +166,11 @@ export class JobManager {
       setSession: (sessionId) => {
         job.sessionId = sessionId;
         this.emit('job', summarize(job));
+      },
+      setProgress: (progress) => {
+        job.progress = progress;
+        this.emit('job-progress', { id: job.id, progress });
+        this.persistSoon(job);
       },
     };
 

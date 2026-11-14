@@ -102,8 +102,7 @@ export function buildRequest(settings: OpenRouterSettings, system: string, tools
   return {
     model: settings.model,
     messages: toChatMessages(system, messages),
-    tools: toChatTools(tools),
-    tool_choice: 'auto',
+    ...(tools.length ? { tools: toChatTools(tools), tool_choice: 'auto' } : {}),
     stream: true,
     reasoning: { effort: settings.effort },
     // Claude needs room for its reasoning plus the answer; other models keep their own default limit.
@@ -140,7 +139,7 @@ const STOP_REASONS: Record<string, Message['stop_reason']> = {
   content_filter: 'refusal',
 };
 
-interface StreamState {
+export interface StreamState {
   model: string;
   text: string;
   calls: Map<number, { id: string; name: string; args: string }>;
@@ -154,27 +153,41 @@ interface StreamState {
   };
 }
 
-function applyChunk(state: StreamState, chunk: Record<string, unknown>): void {
+export const newStreamState = (model: string): StreamState => ({ model, text: '', calls: new Map(), reasoning: [] });
+
+type ToolCallDelta = { index?: number; id?: string; function?: { name?: string; arguments?: string | Record<string, unknown> } };
+
+/** Adds streamed tool-call pieces. Some local servers omit the index or send whole calls with object arguments. */
+export function addToolCalls(state: StreamState, deltas: ToolCallDelta[]): void {
+  deltas.forEach((tc, pos) => {
+    let i: number;
+    if (typeof tc.index === 'number') i = tc.index;
+    else if (tc.id) i = [...state.calls.entries()].find(([, c]) => c.id === tc.id)?.[0] ?? state.calls.size;
+    else i = tc.function?.name ? state.calls.size + pos : Math.max(0, state.calls.size - 1);
+    const cur = state.calls.get(i) ?? { id: '', name: '', args: '' };
+    if (tc.id) cur.id = tc.id;
+    if (tc.function?.name) cur.name = cur.name && !cur.name.endsWith(tc.function.name) ? cur.name + tc.function.name : cur.name || tc.function.name;
+    const a = tc.function?.arguments;
+    if (typeof a === 'string') cur.args += a;
+    else if (a && typeof a === 'object') cur.args = JSON.stringify(a);
+    state.calls.set(i, cur);
+  });
+}
+
+function applyChunk(state: StreamState, chunk: Record<string, unknown>, label: string): void {
   if (chunk.error) {
     const e = chunk.error as { message?: string; code?: number };
-    throw new ProviderError(`OpenRouter stopped mid-answer: ${e.message ?? 'unknown error'}`, e.code);
+    throw new ProviderError(`${label} stopped mid-answer: ${e.message ?? 'unknown error'}`, e.code);
   }
   if (typeof chunk.model === 'string') state.model = chunk.model;
   if (chunk.usage) state.usage = chunk.usage as StreamState['usage'];
   const choice = (chunk.choices as { delta?: Record<string, unknown>; finish_reason?: string | null; error?: { message?: string } }[] | undefined)?.[0];
   if (!choice) return;
-  if (choice.error) throw new ProviderError(`OpenRouter stopped mid-answer: ${choice.error.message ?? 'unknown error'}`);
+  if (choice.error) throw new ProviderError(`${label} stopped mid-answer: ${choice.error.message ?? 'unknown error'}`);
   const d = choice.delta ?? {};
   if (typeof d.content === 'string') state.text += d.content;
   if (Array.isArray(d.reasoning_details)) mergeReasoning(state.reasoning, d.reasoning_details as ReasoningDetail[]);
-  for (const tc of (d.tool_calls as { index?: number; id?: string; function?: { name?: string; arguments?: string } }[] | undefined) ?? []) {
-    const i = tc.index ?? 0;
-    const cur = state.calls.get(i) ?? { id: '', name: '', args: '' };
-    if (tc.id) cur.id = tc.id;
-    if (tc.function?.name) cur.name += tc.function.name;
-    if (tc.function?.arguments) cur.args += tc.function.arguments;
-    state.calls.set(i, cur);
-  }
+  if (Array.isArray(d.tool_calls)) addToolCalls(state, d.tool_calls as ToolCallDelta[]);
   if (choice.finish_reason) state.finish = choice.finish_reason;
 }
 
@@ -183,7 +196,7 @@ export function toMessage(state: StreamState): Message {
   const content: unknown[] = [];
   if (state.reasoning.length) content.push({ type: 'openrouter_reasoning', details: state.reasoning } satisfies ReasoningBlock);
   if (state.text.trim()) content.push({ type: 'text', text: state.text, citations: null });
-  const calls = [...state.calls.entries()].sort((a, b) => a[0] - b[0]).map(([, c]) => c);
+  const calls = [...state.calls.entries()].sort((a, b) => a[0] - b[0]).map(([, c]) => c).filter((c) => c.name);
   calls.forEach((c, n) => {
     let input: unknown;
     try {
@@ -198,7 +211,7 @@ export function toMessage(state: StreamState): Message {
   const written = u.prompt_tokens_details?.cache_write_tokens ?? 0;
   const stop = calls.length ? 'tool_use' : (STOP_REASONS[state.finish ?? 'stop'] ?? 'end_turn');
   return {
-    id: 'openrouter',
+    id: 'chat',
     type: 'message',
     role: 'assistant',
     model: state.model,
@@ -227,11 +240,102 @@ function friendly(status: number, message: string, settings: OpenRouterSettings)
 
 const RETRY = new Set([408, 429, 500, 502, 503, 504]);
 
-function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     const t = setTimeout(resolve, ms);
     signal?.addEventListener('abort', () => { clearTimeout(t); reject(new StoppedError()); }, { once: true });
   });
+}
+
+/** A refused connection or unknown host, explained (the server is not running, or the address is wrong). */
+export function unreachable(err: unknown, label: string, url: string, hint: string): ProviderError | undefined {
+  if ((err as { name?: string }).name === 'AbortError') return undefined;
+  const cause = (err as { cause?: { code?: string } }).cause;
+  if (err instanceof TypeError && (['ECONNREFUSED', 'ENOTFOUND', 'EHOSTUNREACH', 'ECONNRESET'].includes(cause?.code ?? '') || /fetch failed/i.test(err.message))) {
+    return new ProviderError(`Can't reach ${label} at ${new URL(url).origin}. ${hint}`);
+  }
+  return undefined;
+}
+
+export interface ChatRequest {
+  label: string;
+  url: string;
+  headers: Record<string, string>;
+  body: unknown;
+  signal?: AbortSignal;
+  fetchImpl?: typeof fetch;
+  model: string;
+  /** Turns an HTTP error into a message a person can act on. */
+  explain: (status: number, message: string) => string;
+  /** Shown when the server cannot be reached. */
+  unreachableHint: string;
+}
+
+/** POSTs an OpenAI-style chat completions request and reads the streamed answer, retrying busy servers twice. */
+export async function streamChatCompletions(r: ChatRequest): Promise<Message> {
+  const body = JSON.stringify(r.body);
+  const doFetch = r.fetchImpl ?? fetch;
+  for (let attempt = 0; ; attempt++) {
+    let res: Response;
+    try {
+      res = await doFetch(r.url, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', ...r.headers }, body, signal: r.signal });
+    } catch (err) {
+      throw unreachable(err, r.label, r.url, r.unreachableHint) ?? err;
+    }
+    if (!res.ok) {
+      const message = await errorText(res);
+      if (RETRY.has(res.status) && attempt < 2) {
+        await sleep(attempt === 0 ? 1500 : 4000, r.signal);
+        continue;
+      }
+      throw new ProviderError(r.explain(res.status, message), res.status);
+    }
+    return readSse(res, r.model, r.label);
+  }
+}
+
+/** The error message inside a JSON error body ({error: {message}} or {error: "…"}), or the raw text. */
+export async function errorText(res: Response): Promise<string> {
+  const raw = await res.text().catch(() => '');
+  try {
+    const j = JSON.parse(raw) as { error?: { message?: string } | string };
+    return (typeof j.error === 'string' ? j.error : j.error?.message) ?? raw.slice(0, 400);
+  } catch {
+    return raw.slice(0, 400);
+  }
+}
+
+async function readSse(res: Response, model: string, label: string): Promise<Message> {
+  const state = newStreamState(model);
+  if (!res.body) throw new ProviderError(`${label} returned an empty response.`);
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let done = false;
+  while (!done) {
+    const { value, done: end } = await reader.read();
+    if (end) break;
+    buffer += decoder.decode(value, { stream: true });
+    let nl: number;
+    while ((nl = buffer.indexOf('\n')) >= 0) {
+      const line = buffer.slice(0, nl).replace(/\r$/, '');
+      buffer = buffer.slice(nl + 1);
+      if (!line.startsWith('data:')) continue; // ": OPENROUTER PROCESSING" keep-alives and blank lines
+      const payload = line.slice(5).trim();
+      if (payload === '[DONE]') {
+        done = true;
+        break;
+      }
+      try {
+        applyChunk(state, JSON.parse(payload), label);
+      } catch (err) {
+        if (err instanceof ProviderError) throw err;
+        // A malformed chunk: skip it rather than fail the whole turn.
+      }
+    }
+  }
+  await reader.cancel().catch(() => {});
+  return toMessage(state);
 }
 
 /** Calls OpenRouter's chat completions API with streaming, tool calling, reasoning and privacy routing. */
@@ -244,70 +348,18 @@ export class OpenRouterModel implements ModelClient {
     if (!apiKey) throw new ProviderError('Set OPENROUTER_API_KEY in the project .env (or under Settings → AI agent in the dashboard) to use OpenRouter.');
   }
 
-  async next({ system, tools, messages, signal }: { system: string; tools: Tool[]; messages: MessageParam[]; signal?: AbortSignal }): Promise<Message> {
-    const body = JSON.stringify(buildRequest(this.settings, system, tools, messages));
-    const url = `${this.settings.baseUrl.replace(/\/+$/, '')}/chat/completions`;
-    for (let attempt = 0; ; attempt++) {
-      const res = await this.fetchImpl(url, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${this.apiKey}`,
-          'Content-Type': 'application/json',
-          Accept: 'text/event-stream',
-          'X-Title': 'TraceQA',
-        },
-        body,
-        signal,
-      });
-      if (!res.ok) {
-        const raw = await res.text().catch(() => '');
-        let message = raw.slice(0, 400);
-        try {
-          message = (JSON.parse(raw) as { error?: { message?: string } }).error?.message ?? message;
-        } catch {
-          // not JSON
-        }
-        if (RETRY.has(res.status) && attempt < 2) {
-          await sleep(attempt === 0 ? 1500 : 4000, signal);
-          continue;
-        }
-        throw new ProviderError(friendly(res.status, message, this.settings), res.status);
-      }
-      return this.read(res);
-    }
-  }
-
-  private async read(res: Response): Promise<Message> {
-    const state: StreamState = { model: this.settings.model, text: '', calls: new Map(), reasoning: [] };
-    if (!res.body) throw new ProviderError('OpenRouter returned an empty response.');
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let done = false;
-    while (!done) {
-      const { value, done: end } = await reader.read();
-      if (end) break;
-      buffer += decoder.decode(value, { stream: true });
-      let nl: number;
-      while ((nl = buffer.indexOf('\n')) >= 0) {
-        const line = buffer.slice(0, nl).replace(/\r$/, '');
-        buffer = buffer.slice(nl + 1);
-        if (!line.startsWith('data:')) continue; // ": OPENROUTER PROCESSING" keep-alives and blank lines
-        const payload = line.slice(5).trim();
-        if (payload === '[DONE]') {
-          done = true;
-          break;
-        }
-        try {
-          applyChunk(state, JSON.parse(payload));
-        } catch (err) {
-          if (err instanceof ProviderError) throw err;
-          // A malformed chunk: skip it rather than fail the whole turn.
-        }
-      }
-    }
-    await reader.cancel().catch(() => {});
-    return toMessage(state);
+  next({ system, tools, messages, signal }: { system: string; tools: Tool[]; messages: MessageParam[]; signal?: AbortSignal }): Promise<Message> {
+    return streamChatCompletions({
+      label: 'OpenRouter',
+      url: `${this.settings.baseUrl.replace(/\/+$/, '')}/chat/completions`,
+      headers: { Authorization: `Bearer ${this.apiKey}`, 'X-Title': 'TraceQA' },
+      body: buildRequest(this.settings, system, tools, messages),
+      signal,
+      fetchImpl: this.fetchImpl,
+      model: this.settings.model,
+      explain: (status, message) => friendly(status, message, this.settings),
+      unreachableHint: 'Check your internet connection and the API address under Settings → AI agent.',
+    });
   }
 }
 

@@ -10,6 +10,9 @@ export const AGENT_GUIDE = `This project is tested with TraceQA, an MCP server n
 1. Call \`status\` first. It says what exists and what to do next.
 2. If the app map is empty or old, call \`analyze_app\`.
 3. Call \`import_requirements\`, then \`map_requirements\`. Ask the user about anything listed as unclear and save their answer with \`clarify_requirement\`.
+   - Requirement documents can be in any format: Markdown, text, Word or PDF, with or without requirement IDs. TraceQA reads them as they are and gives requirements without an ID a stable REQ-… ID. Add a document with \`import_requirement_document\`, or pull Jira issues with \`import_jira_requirements\` (the Jira key becomes the requirement ID).
+   - If a document reads as too few requirements, call \`read_requirement_document\`, then \`save_document_reading\` with the requirements you find in it (the document's own words; an id only if the document has one). Never rewrite the user's document to fit a format.
+   - No requirements at all? Explore the app anyway: \`explore_start\` with a charter and no requirementId, record real problems with \`explore_record_finding\`, and to automate a flow that works, call \`save_discovered_flow\` (it returns an E2E-… ID) and then \`save_test\` with that ID.
 4. Call \`scaffold_framework\` once, so e2e/ exists.
 5. For each requirement to test:
    - \`get_requirement\` to see its acceptance criteria and mapped pages.
@@ -150,7 +153,7 @@ Put one or more Markdown files here. TraceQA reads every \`.md\` file except thi
 
   const gitignore = path.join(dir, '.gitignore');
   const wanted = [
-    '.env', '.traceqa/sessions/', '.traceqa/runs/', '.traceqa/evidence/', '.traceqa/report/', '.traceqa/jobs/', '.traceqa/trash/',
+    '.env', '.traceqa/sessions/', '.traceqa/runs/', '.traceqa/evidence/', '.traceqa/report/', '.traceqa/jobs/', '.traceqa/trash/', '.traceqa/doc-cache/',
     'e2e/node_modules/', 'e2e/results/',
   ];
   const existing = fs.existsSync(gitignore) ? fs.readFileSync(gitignore, 'utf8') : '';

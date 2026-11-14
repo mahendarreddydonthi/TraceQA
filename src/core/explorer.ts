@@ -171,6 +171,12 @@ export class ExploreSession {
     return { real: v, shown: `"${v}"` };
   }
 
+  /** A readable name for a ref from the latest snapshot, e.g. `button "Add to cart"`, for live progress. */
+  refLabel(ref: string): string | undefined {
+    const spec = this.refs.get(ref);
+    return spec ? describeLocator(spec) : undefined;
+  }
+
   /** Performs one action, records evidence and returns a fresh snapshot. */
   async act(input: ActInput): Promise<string> {
     this.checkBudget();

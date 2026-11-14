@@ -6,6 +6,20 @@ const port = Number(process.argv[2] ?? 4455);
 const issues = [];
 const log = [];
 
+// Stories returned when TraceQA imports requirements from Jira (rich text in Atlassian Document Format).
+const t = (text) => ({ type: 'text', text });
+const p = (text) => ({ type: 'paragraph', content: [t(text)] });
+const h = (text) => ({ type: 'heading', attrs: { level: 3 }, content: [t(text)] });
+const ul = (...items) => ({ type: 'bulletList', content: items.map((i) => ({ type: 'listItem', content: [p(i)] })) });
+const STORIES = [
+  { key: 'DEMO-201', fields: { summary: 'Customers can save a product for later', issuetype: { name: 'Story' }, status: { name: 'To Do' }, components: [{ name: 'Wishlist' }],
+    description: { type: 'doc', version: 1, content: [p('As a customer I want to keep products for later.'), h('Acceptance criteria'), ul('Selecting "Save for later" adds the product to My wishlist', 'The wishlist shows the product name and price')] } } },
+  { key: 'DEMO-202', fields: { summary: 'Guest checkout', issuetype: { name: 'Story' }, status: { name: 'In Progress' }, components: [{ name: 'Checkout' }],
+    description: { type: 'doc', version: 1, content: [p('Customers can buy without an account.'), h('Acceptance Criteria'), p('Scenario: guest pays'), p('Given a cart with one product'), p('When the customer chooses "Continue as guest"'), p('Then the payment page asks for an email address')] } } },
+  { key: 'DEMO-203', fields: { summary: 'Faster search', issuetype: { name: 'Story' }, status: { name: 'To Do' }, components: [{ name: 'Search' }],
+    description: { type: 'doc', version: 1, content: [p('Search should feel quick.')] } } },
+];
+
 function json(res, status, body) {
   res.writeHead(status, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(body));
@@ -24,8 +38,15 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'GET' && url.pathname === '/rest/api/3/search/jql') {
     const jql = url.searchParams.get('jql') ?? '';
     const label = jql.match(/labels = "([^"]+)"/)?.[1];
-    const found = issues.filter((i) => i.fields.labels.includes(label));
-    return json(res, 200, { issues: found.map((i) => ({ key: i.key, fields: { summary: i.fields.summary } })) });
+    if (label) {
+      const found = issues.filter((i) => i.fields.labels.includes(label));
+      return json(res, 200, { issues: found.map((i) => ({ key: i.key, fields: { summary: i.fields.summary } })) });
+    }
+    // Requirement import: stories, two per page.
+    const start = Number(url.searchParams.get('nextPageToken') ?? 0);
+    const page = STORIES.slice(start, start + Math.min(2, Number(url.searchParams.get('maxResults') ?? 2)));
+    const next = start + page.length;
+    return json(res, 200, { issues: page, ...(next < STORIES.length ? { nextPageToken: String(next) } : { isLast: true }) });
   }
   if (req.method === 'POST' && url.pathname === '/rest/api/3/issue') {
     const body = JSON.parse(raw.toString('utf8'));

@@ -18,6 +18,7 @@ export function envFields(config: Pick<TraceQAConfig, 'auth' | 'jira'>): EnvFiel
     { key: config.auth?.passwordEnv ?? 'TEST_USER_PASSWORD', label: 'Test account password', secret: true, group: 'auth' },
     { key: 'ANTHROPIC_API_KEY', label: 'Anthropic API key', secret: true, group: 'ai' },
     { key: 'OPENROUTER_API_KEY', label: 'OpenRouter API key', secret: true, group: 'ai' },
+    { key: 'LMSTUDIO_API_KEY', label: 'LM Studio API key (only if its server requires one)', secret: true, group: 'ai' },
     { key: config.jira?.emailEnv ?? 'JIRA_EMAIL', label: 'Jira account email', secret: false, group: 'jira' },
     { key: config.jira?.tokenEnv ?? 'JIRA_API_TOKEN', label: 'Jira API token', secret: true, group: 'jira' },
   ];
@@ -29,17 +30,26 @@ const UNSAFE_ENV = /^(PATH|PATHEXT|COMSPEC|SHELL|HOME|USERPROFILE|NODE_.*|NPM_.*
 const EDITABLE = ['baseUrl', 'browsers', 'auth', 'safety', 'ai', 'jira', 'analyze'] as const;
 export type SettingsPatch = Partial<Record<(typeof EDITABLE)[number], unknown>>;
 
-/** Whether the key for the chosen AI provider is set, and where it comes from. */
-export function aiKeyStatus(project: Project): { configured: boolean; source: string | null; keyName: string } {
-  if (project.config.ai.provider === 'openrouter') {
+/**
+ * Whether the chosen AI provider is ready: a key for Anthropic and OpenRouter, a chosen model for
+ * Ollama and LM Studio (they run on this computer; LM Studio's key is optional).
+ */
+export function aiKeyStatus(project: Project): { configured: boolean; source: string | null; keyName: string; missing: 'key' | 'model' | null; local: boolean } {
+  const ai = project.config.ai;
+  const from = (k: string) => (process.env[k] ? 'environment' : '.env');
+  if (ai.provider === 'ollama' || ai.provider === 'lmstudio') {
+    const model = ai.provider === 'ollama' ? ai.ollama.model : ai.lmstudio.model;
+    return { configured: !!model, source: 'this computer', keyName: '', missing: model ? null : 'model', local: true };
+  }
+  if (ai.provider === 'openrouter') {
     const keyName = 'OPENROUTER_API_KEY';
-    if (project.env[keyName]) return { configured: true, source: process.env[keyName] ? 'environment' : '.env', keyName };
-    return { configured: false, source: null, keyName };
+    if (project.env[keyName]) return { configured: true, source: from(keyName), keyName, missing: null, local: false };
+    return { configured: false, source: null, keyName, missing: 'key', local: false };
   }
   const keyName = 'ANTHROPIC_API_KEY';
-  if (project.env[keyName]) return { configured: true, source: process.env[keyName] ? 'environment' : '.env', keyName };
-  if (project.env.ANTHROPIC_AUTH_TOKEN) return { configured: true, source: 'ANTHROPIC_AUTH_TOKEN', keyName };
-  return { configured: false, source: null, keyName };
+  if (project.env[keyName]) return { configured: true, source: from(keyName), keyName, missing: null, local: false };
+  if (project.env.ANTHROPIC_AUTH_TOKEN) return { configured: true, source: 'ANTHROPIC_AUTH_TOKEN', keyName, missing: null, local: false };
+  return { configured: false, source: null, keyName, missing: 'key', local: false };
 }
 
 export function getSettings(project: Project) {

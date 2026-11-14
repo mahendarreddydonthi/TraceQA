@@ -37,7 +37,7 @@ export function trackingLabel(bug: Bug): string {
   return `tqa-${base}`.replace(/[^A-Za-z0-9_-]/g, '-');
 }
 
-function jiraConfig(project: Project) {
+export function jiraConfig(project: Project) {
   const j = project.config.jira;
   if (!j) {
     throw new Error('Jira is not configured. Add a "jira" section to traceqa.config.json (baseUrl, projectKey) or set JIRA_BASE_URL and JIRA_PROJECT_KEY.');
@@ -51,7 +51,7 @@ function jiraConfig(project: Project) {
   return { ...j, base: j.baseUrl.replace(/\/+$/, ''), authorization };
 }
 
-async function call<T>(cfg: ReturnType<typeof jiraConfig>, method: string, url: string, body?: unknown, extraHeaders: Record<string, string> = {}): Promise<T> {
+export async function call<T>(cfg: ReturnType<typeof jiraConfig>, method: string, url: string, body?: unknown, extraHeaders: Record<string, string> = {}): Promise<T> {
   const isForm = body instanceof FormData;
   const res = await fetch(`${cfg.base}${url}`, {
     method,
