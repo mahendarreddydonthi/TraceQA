@@ -37,10 +37,13 @@ export interface ServerCommand {
   args: string[];
 }
 
-/** How AI tools should start the server. Until TraceQA is published to npm, this points at the local build. */
+/** The package on npm. Its command is still "traceqa". */
+export const NPM_PACKAGE = '@mahendarreddy/traceqa';
+
+/** How AI tools should start the server: this installation's cli.js, or "npx -y @mahendarreddy/traceqa" with useNpx. */
 export function serverCommand(projectDir: string, useNpx = false): ServerCommand {
   const project = projectDir.split(path.sep).join('/');
-  if (useNpx) return { command: 'npx', args: ['-y', 'traceqa', 'mcp', '--project', project] };
+  if (useNpx) return { command: 'npx', args: ['-y', NPM_PACKAGE, 'mcp', '--project', project] };
   const cli = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'cli.js').split(path.sep).join('/');
   return { command: 'node', args: [cli, 'mcp', '--project', project] };
 }
@@ -48,8 +51,8 @@ export function serverCommand(projectDir: string, useNpx = false): ServerCommand
 /** Double-click launchers for the dashboard, so people who never use a terminal can open it. */
 export function dashboardLaunchers(useNpx = false): { name: string; text: string; executable?: boolean }[] {
   const cli = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'cli.js');
-  const win = useNpx ? 'npx -y traceqa' : `node "${cli}"`;
-  const unix = useNpx ? 'npx -y traceqa' : `node "${cli.split(path.sep).join('/')}"`;
+  const win = useNpx ? `npx -y ${NPM_PACKAGE}` : `node "${cli}"`;
+  const unix = useNpx ? `npx -y ${NPM_PACKAGE}` : `node "${cli.split(path.sep).join('/')}"`;
   return [
     {
       name: 'TraceQA Dashboard.cmd',

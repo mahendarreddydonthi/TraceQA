@@ -16,21 +16,37 @@ No requirements yet? TraceQA can also explore the app on its own, find bugs, and
 
 The tests it writes are plain Playwright. They run with `npx playwright test`, with no AI involved.
 
-## Install (from this folder, until it is published to npm)
+## Install
+
+TraceQA needs Node.js 22.13 or later.
+
+```bash
+npm install -g @mahendarreddy/traceqa
+```
+
+```bash
+npx playwright@1.65.0 install chromium
+```
+
+The second command installs the browser TraceQA uses. Keep the version: it must match the Playwright version inside TraceQA, and a plain `npx playwright` may fetch a newer one.
+
+The command is `traceqa`. To try TraceQA without installing it, use `npx @mahendarreddy/traceqa` wherever this README says `traceqa`.
+
+### From source
 
 ```bash
 npm install
 ```
 
 ```bash
-npx playwright install chromium
-```
-
-```bash
 npm run build
 ```
 
-Optionally `npm link` makes the `traceqa` command available everywhere. Otherwise run `node <path>/traceqa/dist/cli.js`.
+```bash
+npm link
+```
+
+`npm link` makes the `traceqa` command run your local build. Install the browser as above.
 
 ## Use it on your app
 

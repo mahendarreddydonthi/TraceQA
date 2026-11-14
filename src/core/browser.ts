@@ -1,8 +1,23 @@
+import { createRequire } from 'node:module';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
 import { isAllowedUrl, type Project } from './config.js';
 import { resolveLocator, stabilityOf } from './locators.js';
 import type { LocatorSpec, PageElement, Stability } from './types.js';
 import { camel } from './store.js';
+
+/**
+ * The command that installs the browser TraceQA's own Playwright needs. The version is pinned: a plain
+ * "npx playwright" can fetch a newer Playwright whose browser build this one cannot use.
+ */
+export function browserInstallCommand(): string {
+  let version = '';
+  try {
+    version = (createRequire(import.meta.url)('playwright/package.json') as { version: string }).version;
+  } catch {
+    // fall back to the unpinned command
+  }
+  return `npx playwright${version ? `@${version}` : ''} install chromium`;
+}
 
 export async function launchBrowser(headed = false): Promise<Browser> {
   try {
@@ -10,7 +25,7 @@ export async function launchBrowser(headed = false): Promise<Browser> {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (/Executable doesn't exist|browserType\.launch/i.test(msg)) {
-      throw new Error('Playwright Chromium is not installed. Run: npx playwright install chromium');
+      throw new Error(`Playwright Chromium is not installed. Run: ${browserInstallCommand()}`);
     }
     throw err;
   }

@@ -1,24 +1,49 @@
 {
-  "name": "traceqa",
+  "name": "@mahendarreddy/traceqa",
   "version": "0.5.0",
   "description": "Requirement-driven testing agent: maps requirements to your app, explores it, writes a Playwright framework and traces every result back to a requirement.",
+  "keywords": [
+    "testing",
+    "e2e",
+    "playwright",
+    "requirements",
+    "traceability",
+    "test-automation",
+    "qa",
+    "ai-agent",
+    "mcp"
+  ],
+  "author": "Donthi Mahendar Reddy",
+  "license": "MIT",
+  "homepage": "https://github.com/mahendarreddydonthi/TraceQA#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mahendarreddydonthi/TraceQA.git"
+  },
+  "bugs": {
+    "url": "https://github.com/mahendarreddydonthi/TraceQA/issues"
+  },
   "type": "module",
   "bin": {
     "traceqa": "dist/cli.js"
   },
-  "main": "dist/index.js",
+  "publishConfig": {
+    "access": "public"
+  },
   "files": [
-    "dist",
+    "dist/**/*.js",
     "ui"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=22.13"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsx src/cli.ts",
     "test": "tsx --test test/*.test.ts",
-    "smoke": "node scripts/smoke-mcp.mjs"
+    "smoke": "node scripts/smoke-mcp.mjs",
+    "prepack": "npm run build",
+    "prepublishOnly": "npm test"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "1.6.0",
@@ -33,7 +58,5 @@
     "@types/node": "^22.0.0",
     "tsx": "4.23.15",
     "typescript": "7.0.2"
-  },
-  "license": "MIT",
-  "private": true
+  }
 }

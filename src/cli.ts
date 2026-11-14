@@ -82,7 +82,7 @@ program
   .description('Set up TraceQA in a project folder')
   .option('--url <url>', 'base URL of the app under test (staging)')
   .option('--agents', 'also connect AI coding tools: .mcp.json, .cursor/, .codex/, AGENTS.md, Claude skill')
-  .option('--npx', 'use "npx -y traceqa mcp" in AI tool configs (once TraceQA is published to npm)')
+  .option('--npx', 'use "npx -y @mahendarreddy/traceqa mcp" in AI tool configs instead of the path to this installation')
   .action(
     action((opts: { url?: string; agents?: boolean; npx?: boolean }) => {
       const dir = path.resolve(program.opts().project ?? process.cwd());
