@@ -1,4 +1,4 @@
-# TraceQA v0.5
+# TraceQA
 
 TraceQA is a requirement-driven testing agent for **web apps**. It reads your requirements (Markdown, Word, PDF or Jira), maps them to the pages of your app, explores the app in a real browser, writes a plain Playwright framework, runs it, repairs tests broken by UI changes, and traces every result and bug back to a requirement.
 
